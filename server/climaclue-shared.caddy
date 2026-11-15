@@ -26,10 +26,10 @@
 		file_server
 	}
 }
-http://climaclue.com, http://www.climaclue.com, http://new.climaclue.com {
+http://climaclue.com, http://www.climaclue.com {
 	import climaclue_site
 }
-climaclue.com, www.climaclue.com, new.climaclue.com {
+climaclue.com, www.climaclue.com {
 	tls internal
 	import climaclue_site
 }
