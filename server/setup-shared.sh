@@ -13,7 +13,7 @@ main() {
 
   echo "== downloading site and map data (about 1.2 GB)"
   mkdir -p /srv/climaclue
-  [ -d /srv/climaclue/public/.git ] || git clone -q --depth 1 https://github.com/yash64ag/climclue-tiles /srv/climaclue/public
+  if [ -d /srv/climaclue/public/.git ]; then git -C /srv/climaclue/public fetch -q --depth 1 origin main && git -C /srv/climaclue/public reset -q --hard origin/main; else git clone -q --depth 1 https://github.com/yash64ag/climclue-tiles /srv/climaclue/public; fi
   (cd /srv/climaclue/public/squares && sha256sum -c ../SHA256SUMS --quiet) && echo "map data verified"
   chmod -R a+rX /srv/climaclue
 
@@ -22,7 +22,7 @@ main() {
   mkdir -p /etc/caddy/sites
   install -m 644 /srv/climaclue/public/server/climaclue-shared.caddy /etc/caddy/sites/climaclue.caddy
   [ -f "$BK" ] || cp -p "$CF" "$BK"
-  grep -q '^import /etc/caddy/sites/\*.caddy' "$CF" || printf '\n# Added for ClimaClue (backup: %s)\nimport /etc/caddy/sites/*.caddy\n' "$BK" >> "$CF"
+  grep -qxF "import /etc/caddy/sites/*.caddy" "$CF" || printf "\n# Added for ClimaClue: loads /etc/caddy/sites/*.caddy (keep this line)\nimport /etc/caddy/sites/*.caddy\n" >> "$CF"
   if ! caddy validate --config "$CF" --adapter caddyfile >/tmp/climaclue-validate.log 2>&1; then
     cp -p "$BK" "$CF"; rm -f /etc/caddy/sites/climaclue.caddy
     echo "Caddy rejected the change; original restored, nothing else changed. Details:"; tail -5 /tmp/climaclue-validate.log; exit 1
@@ -38,7 +38,9 @@ main() {
   echo "== checks"
   sleep 2
   echo "existing site before: $before  after: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/)"
-  echo "climaclue.com: $(curl -s -o /dev/null -w '%{http_code}' -H 'Host: climaclue.com' http://127.0.0.1/)"
+  echo "climaclue.com: $(curl -s -H "Host: climaclue.com" http://127.0.0.1/ | grep -o "<title>[^<]*" | head -1)"
+  echo "port 443: $(curl -sk -o /dev/null -w "%{http_code}" --resolve climaclue.com:443:127.0.0.1 https://climaclue.com/)"
+  : "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: climaclue.com' http://127.0.0.1/)"
   echo "map tile: $(curl -s -o /dev/null -w '%{http_code}' -H 'Host: climaclue.com' http://127.0.0.1/squares/t0_35.bin)  ocean tile: $(curl -s -o /dev/null -w '%{http_code}' -H 'Host: climaclue.com' http://127.0.0.1/squares/t0_0.bin)"
   echo "DONE"
 }
