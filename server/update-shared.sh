@@ -33,6 +33,14 @@ main() {
     if caddy validate --config "$CF" --adapter caddyfile >/dev/null 2>&1; then systemctl reload caddy
     else install -m 644 /tmp/climaclue.caddy.prev /etc/caddy/sites/climaclue.caddy; echo "new ClimaClue Caddy settings invalid; kept the old ones"; fi
   fi
+  # Chat service: install or update its unit, restart when the service code changed.
+  if [ -f "$PUB/server/api/climaclue-api.mjs" ]; then
+    if ! cmp -s "$PUB/server/climaclue-api.service" /etc/systemd/system/climaclue-api.service; then
+      install -m 644 "$PUB/server/climaclue-api.service" /etc/systemd/system/climaclue-api.service
+      systemctl daemon-reload; systemctl enable climaclue-api >/dev/null 2>&1 || true
+    fi
+    systemctl restart climaclue-api || echo "climaclue-api did not start"
+  fi
   # Keep this updater itself current (takes effect on the next run).
   cmp -s "$PUB/server/update-shared.sh" /usr/local/bin/climaclue-update || install -m 755 "$PUB/server/update-shared.sh" /usr/local/bin/climaclue-update
   echo "$(date -Is) published $(git -C "$PUB" log -1 --format=%s)"

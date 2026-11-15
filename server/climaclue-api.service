@@ -1,0 +1,21 @@
+[Unit]
+Description=ClimaClue chat service (answers questions from the site's data)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/node /srv/climaclue/public/server/api/climaclue-api.mjs
+Environment=CLIMACLUE_DATA=/srv/climaclue/public PORT=8090
+# The Anthropic key and monthly cap live here (root-only file, created once by hand).
+EnvironmentFile=-/etc/climaclue/api.env
+StateDirectory=climaclue-api
+DynamicUser=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
