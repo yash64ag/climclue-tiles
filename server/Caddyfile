@@ -1,0 +1,3 @@
+# Front door for every project on this server. Cloudflare is the public edge; this only accepts
+# Cloudflare's addresses (firewall). Each project adds one file in /etc/caddy/sites/.
+import /etc/caddy/sites/*.caddy

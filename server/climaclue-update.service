@@ -1,0 +1,8 @@
+[Unit]
+Description=Pull, rebuild and publish ClimaClue when GitHub changes
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/climaclue-update

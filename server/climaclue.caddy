@@ -1,0 +1,8 @@
+# ClimaClue: Cloudflare -> Caddy (port 80 or 443 with an internal certificate) -> nginx container on 127.0.0.1:8081
+http://climaclue.com, http://www.climaclue.com, http://new.climaclue.com {
+	reverse_proxy 127.0.0.1:8081
+}
+climaclue.com, www.climaclue.com, new.climaclue.com {
+	tls internal
+	reverse_proxy 127.0.0.1:8081
+}

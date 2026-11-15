@@ -1,0 +1,14 @@
+# ClimaClue on the shared Hetzner server. Only reachable from the same machine (127.0.0.1:8081);
+# Caddy on the host (the shared front door) forwards climaclue.com to it.
+services:
+  web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /srv/climaclue/public/site:/usr/share/nginx/html:ro
+      - /srv/climaclue/public/squares:/srv/squares:ro
+    mem_limit: 256m
+    cpus: 1.0

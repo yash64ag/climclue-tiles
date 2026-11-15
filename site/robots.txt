@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /squares/
+
+Sitemap: https://climaclue.com/sitemap.xml
