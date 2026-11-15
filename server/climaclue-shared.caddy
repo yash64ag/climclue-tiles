@@ -1,7 +1,17 @@
 # ClimaClue on a shared Caddy front door: served straight from files, no containers.
 # Cloudflare -> Caddy (port 80, or 443 with an internal certificate) -> /srv/climaclue/public.
 (climaclue_site) {
-	encode gzip
+	# Compress text and the binary climate files (tiles and map colours shrink about 4x).
+	encode {
+		gzip
+		match {
+			header Content-Type text/*
+			header Content-Type application/json*
+			header Content-Type application/javascript*
+			header Content-Type application/octet-stream*
+			header Content-Type image/svg+xml*
+		}
+	}
 	header X-Robots-Tag "noindex"
 	header X-Content-Type-Options "nosniff"
 	handle_path /squares/* {
