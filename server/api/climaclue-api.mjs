@@ -27246,7 +27246,7 @@ function suggestQuestions(square, tab, town) {
 	return out.sort((a, b) => b.score - a.score).slice(0, 3);
 }
 // src/stations.ts
-var km = ([lon1, lat1], [lon2, lat2]) => {
+var km$1 = ([lon1, lat1], [lon2, lat2]) => {
 	const r = Math.PI / 180, h = Math.sin((lat2 - lat1) * r / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin((lon2 - lon1) * r / 2) ** 2;
 	return 12742 * Math.asin(Math.min(1, Math.sqrt(h)));
 };
@@ -27260,7 +27260,7 @@ function nearestRecord(data, at, kind, maxKm = 75) {
 		const lat = data.y[i] / 1e3, lon = data.x[i] / 1e3;
 		if (Math.abs(lat - at[1]) > latSpan) continue;
 		if (Math.abs((lon - at[0] + 540) % 360 - 180) > lonSpan) continue;
-		const d = km(at, [lon, lat]);
+		const d = km$1(at, [lon, lat]);
 		if (d < bestKm) {
 			bestKm = d;
 			best = i;
@@ -27280,10 +27280,68 @@ function nearestRecord(data, at, kind, maxKm = 75) {
 		coverage: data.cov[best]
 	};
 }
+// src/snow-stations.ts
+var km = ([lon1, lat1], [lon2, lat2]) => {
+	const r = Math.PI / 180, h = Math.sin((lat2 - lat1) * r / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin((lon2 - lon1) * r / 2) ** 2;
+	return 12742 * Math.asin(Math.min(1, Math.sqrt(h)));
+};
+/**
+* The best nearby snowfall record within maxKm: a station still reporting in recent years with the
+* longest record (so "last snowfall" is current), else the longest record; the nearest breaks ties.
+*/
+function nearestSnowRecord(data, at, maxKm = 75) {
+	const latSpan = maxKm / 111, lonSpan = maxKm / (111 * Math.max(.05, Math.cos(at[1] * Math.PI / 180)));
+	let best = -1, bestKm = Infinity, bestScore = -Infinity;
+	let nearby = null;
+	const candidates = [];
+	const recent = String((/* @__PURE__ */ new Date()).getFullYear() - 5);
+	for (let i = 0; i < data.id.length; i++) {
+		const lat = data.y[i] / 1e3, lon = data.x[i] / 1e3;
+		if (Math.abs(lat - at[1]) > latSpan) continue;
+		if (Math.abs((lon - at[0] + 540) % 360 - 180) > lonSpan) continue;
+		const d = km(at, [lon, lat]);
+		if (d > maxKm) continue;
+		const years = (Date.parse(data.end[i]) - Date.parse(data.start[i])) / 3156e7;
+		const score = (data.end[i] >= recent ? 40 : 0) + Math.min(years, 100) - d;
+		if (score > bestScore) {
+			bestScore = score;
+			best = i;
+			bestKm = d;
+		}
+		candidates.push(i);
+	}
+	if (best < 0 || bestKm > maxKm) return null;
+	for (const i of candidates) {
+		if (!data.last[i] || Math.abs(data.z[i] - data.z[best]) > 300) continue;
+		const d = km(at, [data.x[i] / 1e3, data.y[i] / 1e3]);
+		if (d > 75) continue;
+		if (!nearby || data.last[i] > nearby.date) nearby = {
+			name: data.name[i],
+			km: d,
+			date: data.last[i],
+			mm: data.lastmm[i] ?? 0
+		};
+	}
+	return {
+		id: data.id[best],
+		name: data.name[best],
+		km: bestKm,
+		elevationM: data.z[best],
+		maxMm: data.max[best],
+		maxDate: data.maxd[best],
+		last: data.last[best],
+		lastMm: data.lastmm[best],
+		trace: data.trace[best],
+		snowyDays: data.snowy[best],
+		start: data.start[best],
+		end: data.end[best],
+		nearby
+	};
+}
 // api/context.ts
 /** The data ClimaClue's answers are grounded in: one place's real values from the site's own files. */
 var r1 = (v) => v === null ? null : Math.round(v * 10) / 10;
-function placeContext(name, square, stations) {
+function placeContext(name, square, stations, snowStations = null) {
 	const L = square.layers, lat = (square.bounds[1] + square.bounds[3]) / 2, lon = (square.bounds[0] + square.bounds[2]) / 2;
 	const type = koppen(L.tas.mean, L.pr.mean, lat);
 	const hi = stations ? nearestRecord(stations, [lon, lat], "high", 200) : null, lo = stations ? nearestRecord(stations, [lon, lat], "low", 200) : null;
@@ -27328,6 +27386,7 @@ function placeContext(name, square, stations) {
 			high: rec(hi),
 			low: rec(lo)
 		},
+		station_snow_records: snowRecord(snowStations, [lon, lat]),
 		sources: "CHELSA V2.1 1981-2010 (temperature, precipitation, wind, humidity, cloud); ERA5-Land dew point, snowfall and snow depth 1981-2010; CRU CL 2.0 sunshine about 1961-1990; NOAA GHCN-Daily station records"
 	};
 }
@@ -27338,7 +27397,31 @@ Every number you state must come from DATA or a tool result (say which month or 
 When the visitor asks to compare two places (or this place with another): look up the other place with place_climate and call propose_comparison (so they can open both side by side), then, after all tool calls, write the comparison with real numbers from both places; the offer never replaces the answer. Mention the offer in one short closing sentence.
 Explain causes with real geography (ocean currents, prevailing winds, mountains, latitude, distance from the sea, elevation), specific to each place rather than generic to its climate type. If a cause is not shown by the data, present it as the usual explanation ("This is mainly because…") without overstating certainty.
 If the question is not about climate, weather, geography or this site, politely steer back to the place. If even the tools cannot answer it, say so briefly.
+Talk about the climate, not about ClimaClue: do not describe how the site processes, adjusts or caps its data, or which models it uses, unless the visitor asks how the numbers are made. For questions like "has it ever snowed here?", use station_snow_records (measured snowfall at the nearest weather station) and give its dates; averages of zero do not mean it never happened.
 Text written between tool calls is not shown to the visitor: make all your lookups first, then put the complete answer in your final message.`;
+/** Measured snowfall at the nearest station with a snowfall record (cm of new snow). */
+function snowRecord(data, at) {
+	const r = data ? nearestSnowRecord(data, at, 100) : null;
+	if (!r) return "no station with a snowfall record within 100 km";
+	return {
+		station: r.name,
+		km: Math.round(r.km),
+		elevation_m: r.elevationM,
+		observed: `${r.start.slice(0, 4)}-${r.end.slice(0, 4)}`,
+		days_with_measurable_snow: r.snowyDays,
+		biggest_day_cm: r.maxMm === null ? null : Math.round(r.maxMm) / 10,
+		biggest_day_date: r.maxDate,
+		last_measurable_snow: r.last,
+		last_measurable_cm: r.lastMm === null ? null : Math.round(r.lastMm) / 10,
+		last_trace_of_snow: r.trace,
+		most_recent_snowfall_any_station_within_100km: r.nearby ? {
+			station: r.nearby.name,
+			km: Math.round(r.nearby.km),
+			date: r.nearby.date,
+			cm: Math.round(r.nearby.mm) / 10
+		} : null
+	};
+}
 // src/places.ts
 var fold = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 var PlacesIndex = class {
@@ -27652,7 +27735,7 @@ async function runTool(env, name, input) {
 				longitude: lon,
 				population: p.population,
 				other_matches: hits.slice(1).map(placeLabel),
-				data: placeContext(placeLabel(p), s, env.stations)
+				data: placeContext(placeLabel(p), s, env.stations, env.snowStations ?? null)
 			}) };
 		}
 		if (name === "point_climate") {
@@ -27668,7 +27751,7 @@ async function runTool(env, name, input) {
 			const label = String(input.label || "this spot").slice(0, 80), near = townsOf(env).nearest([input.lon, input.lat], 1)[0];
 			return { content: ok({
 				nearest_town: near ? `${placeLabel(near)}, ${Math.round(near.km)} km away` : null,
-				data: placeContext(label, s, env.stations)
+				data: placeContext(label, s, env.stations, env.snowStations ?? null)
 			}) };
 		}
 		if (name === "similar_places") {
@@ -27858,6 +27941,10 @@ var stations = null;
 try {
 	stations = JSON.parse(readFileSync(`${DATA}/squares/stations-v1.json`, "utf8"));
 } catch {}
+var snowStations = null;
+try {
+	snowStations = JSON.parse(readFileSync(`${DATA}/squares/snow-stations-v1.json`, "utf8"));
+} catch {}
 var spendFile = `${STATE}/spend.json`;
 var month = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 7);
 var spend = existsSync(spendFile) ? JSON.parse(readFileSync(spendFile, "utf8")) : {
@@ -27912,7 +27999,7 @@ async function load(p) {
 	return r.status === "land" ? r.square : null;
 }
 async function answer(places, question, tab, history) {
-	const data = places.map((p) => placeContext(p.name, p.square, stations));
+	const data = places.map((p) => placeContext(p.name, p.square, stations, snowStations));
 	const messages = [];
 	for (const h of history.slice(-3)) messages.push({
 		role: "user",
@@ -27958,7 +28045,8 @@ async function answer(places, question, tab, history) {
 			const out = await runTool({
 				data: DATA,
 				fetcher: fileFetcher,
-				stations
+				stations,
+				snowStations
 			}, c.name, c.input ?? {});
 			if (out.proposal) proposal = out.proposal;
 			return {
@@ -28059,7 +28147,7 @@ async function prewarm(n, perTab) {
 		const square = await load(p);
 		if (!square) continue;
 		seen.add(id);
-		const data = placeContext(p.name, square, stations);
+		const data = placeContext(p.name, square, stations, snowStations);
 		for (const tab of TABS) for (const s of suggestQuestions(square, tab, towns.n[i]).slice(0, perTab)) {
 			const key = `v2|${square.id}|${tab}|${s.id}`;
 			if (stored.has(key)) continue;
