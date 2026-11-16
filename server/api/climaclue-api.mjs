@@ -27327,7 +27327,8 @@ If the question is not about climate, weather, geography or this site, politely 
 *  - stored answers for suggested questions (served free, never counted against limits).
 * Visitor addresses are only kept in memory to count today's questions; questions are not logged.
 * Usage: node climaclue-api.mjs            (serve)
-*        node climaclue-api.mjs --prewarm N (store suggested-question answers for the N biggest cities, Batch API)
+*        node climaclue-api.mjs --prewarm N [K] (store answers to the top K suggested questions per tab, default 3,
+*        for the N biggest cities, with the Batch API at half price)
 */
 var MODEL = "claude-sonnet-5-5";
 var PRICE_IN = 2;
@@ -27453,12 +27454,13 @@ var json = (res, status, body) => {
 };
 var num = (v, lo, hi) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi;
 async function handle(req, res) {
-	if (req.url === "/api/health") return json(res, 200, {
+	const path = (req.url ?? "").split("?")[0];
+	if (path === "/api/health") return json(res, 200, {
 		ok: true,
 		chat: !!client && !overCap(),
 		stored: stored.size
 	});
-	if (req.url !== "/api/ask" || req.method !== "POST") return json(res, 404, { error: "Not found" });
+	if (path !== "/api/ask" || req.method !== "POST") return json(res, 404, { error: "Not found" });
 	let raw = "";
 	for await (const chunk of req) {
 		raw += chunk;
@@ -27507,7 +27509,7 @@ async function handle(req, res) {
 	}
 }
 /** Store suggested-question answers for the N biggest cities with the Batch API (half price). */
-async function prewarm(n) {
+async function prewarm(n, perTab) {
 	if (!client) throw new Error("ANTHROPIC_API_KEY is not set");
 	const towns = JSON.parse(readFileSync(`${DATA}/site/places/places-v1.json`, "utf8"));
 	const requests = [], keys = /* @__PURE__ */ new Map();
@@ -27524,7 +27526,7 @@ async function prewarm(n) {
 		if (!square) continue;
 		seen.add(id);
 		const data = placeContext(p.name, square, stations);
-		for (const tab of TABS) for (const s of suggestQuestions(square, tab, towns.n[i])) {
+		for (const tab of TABS) for (const s of suggestQuestions(square, tab, towns.n[i]).slice(0, perTab)) {
 			const key = `${square.id}|${tab}|${s.id}`;
 			if (stored.has(key)) continue;
 			const custom_id = `q${requests.length}`;
@@ -27569,7 +27571,7 @@ async function prewarm(n) {
 		console.log(`stored ${saved} answers, about $${cost.toFixed(2)}`);
 	}
 }
-if (process.argv[2] === "--prewarm") prewarm(Number(process.argv[3] ?? 1e3)).then(() => process.exit(0), (e) => {
+if (process.argv[2] === "--prewarm") prewarm(Number(process.argv[3] ?? 1e3), Number(process.argv[4] ?? 3)).then(() => process.exit(0), (e) => {
 	console.error(e.message);
 	process.exit(1);
 });
