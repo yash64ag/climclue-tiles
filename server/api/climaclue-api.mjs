@@ -27925,6 +27925,7 @@ async function answer(places, question, tab, history) {
 		content: `DATA (from ClimaClue's own layers):\n${JSON.stringify(data)}\n\nThe visitor is on the ${tab} tab, looking at: ${places.map((p) => p.name).join(" and ")}.\nQuestion: ${question}`
 	});
 	let proposal = null;
+	const said = [];
 	for (let round = 0; round < 6; round++) {
 		const r = await client.beta.messages.create({
 			model: MODEL,
@@ -27942,8 +27943,9 @@ async function answer(places, question, tab, history) {
 			proposal: null
 		};
 		const text = r.content.filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+		if (text) said.push(text);
 		if (r.stop_reason !== "tool_use") return {
-			text,
+			text: said.join("\n\n"),
 			proposal
 		};
 		messages.push({
@@ -27971,7 +27973,7 @@ async function answer(places, question, tab, history) {
 		});
 	}
 	return {
-		text: "That needed more lookups than I can do in one answer. Try asking about one or two places at a time.",
+		text: said.length ? said.join("\n\n") : "That needed more lookups than I can do in one answer. Try asking about one or two places at a time.",
 		proposal
 	};
 }
