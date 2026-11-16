@@ -27320,7 +27320,7 @@ function placeContext(name, square, stations) {
 		notes: [
 			square.sunFallbackKm ? `sunshine taken from the nearest source cell ${square.sunFallbackKm} km away` : null,
 			square.dewFallback ? "dew point from the coarser ERA5 grid" : null,
-			"snowfall: 1 mm water equivalent is roughly 1 cm of fresh snow (the site shows that estimate); ~9 km cells smooth out mountains",
+			"snowfall: 1 mm water equivalent is roughly 1 cm of fresh snow (the site shows that estimate); ~9 km cells smooth out mountains; in mild climates snowfall is capped to what local temperatures allow",
 			square.snowFallbackKm ? `snow taken from the nearest land cell ${square.snowFallbackKm} km away` : null,
 			lat < -60 ? "Antarctica: very few weather stations, values are model estimates" : null
 		].filter(Boolean),
