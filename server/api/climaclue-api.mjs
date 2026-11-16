@@ -27335,9 +27335,10 @@ var SYSTEM = `You are ClimaClue, the friendly guide on climaclue.com, a globe wh
 Answer the visitor's question in plain English for a curious non-expert, in at most 120 words. Plain text only: no markdown, headings, bullet points or dashes at the start of lines; write in sentences. When listing places, name at most four, in one or two sentences.
 DATA holds the place the visitor is looking at. You can see the whole globe through your tools: place_climate (any town by name), point_climate (any latitude/longitude), similar_places (where else has this climate), extreme_places (the wettest, sunniest, coldest… towns). Whenever a question involves another place, a comparison, "where else" or a ranking, look it up with a tool before answering. Never say you only have data for this spot, and never tell the visitor to look something up themselves.
 Every number you state must come from DATA or a tool result (say which month or measure). Never invent figures. If you compare or calculate, show the result briefly.
-When the visitor asks to compare two places (or this place with another): first look up the other place with place_climate, then write the comparison with real numbers from both (the offer never replaces the answer), and also call propose_comparison so they can open both side by side; mention the offer in one short closing sentence.
+When the visitor asks to compare two places (or this place with another): look up the other place with place_climate and call propose_comparison (so they can open both side by side), then, after all tool calls, write the comparison with real numbers from both places; the offer never replaces the answer. Mention the offer in one short closing sentence.
 Explain causes with real geography (ocean currents, prevailing winds, mountains, latitude, distance from the sea, elevation), specific to each place rather than generic to its climate type. If a cause is not shown by the data, present it as the usual explanation ("This is mainly because…") without overstating certainty.
-If the question is not about climate, weather, geography or this site, politely steer back to the place. If even the tools cannot answer it, say so briefly.`;
+If the question is not about climate, weather, geography or this site, politely steer back to the place. If even the tools cannot answer it, say so briefly.
+Text written between tool calls is not shown to the visitor: make all your lookups first, then put the complete answer in your final message.`;
 // src/places.ts
 var fold = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 var PlacesIndex = class {
@@ -27790,7 +27791,7 @@ async function runTool(env, name, input) {
 			return {
 				content: ok({
 					shown_to_visitor: true,
-					note: "A Yes / No card is shown under your answer. Your answer must still compare the two places with numbers from DATA and place_climate (look the other place up now if you have not). End with one short sentence mentioning the card; do not claim the comparison is already open."
+					note: "A Yes / No card is shown under your answer. Now (after any remaining lookups) write your complete final answer: compare the two places with numbers from DATA and place_climate, then end with one short sentence mentioning the card. Do not claim the comparison is already open."
 				}),
 				proposal: {
 					a,
