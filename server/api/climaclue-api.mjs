@@ -27332,10 +27332,483 @@ function placeContext(name, square, stations) {
 	};
 }
 var SYSTEM = `You are ClimaClue, the friendly guide on climaclue.com, a globe where people explore the climate of any place on Earth.
-Answer the visitor's question in plain English for a curious non-expert, in at most 110 words. Plain text only: no markdown, headings or bullet lists.
-Every number you state must come from the DATA (say which month or measure). Never invent figures. If you compare or calculate, show the result briefly.
-Explain causes with real geography (ocean currents, prevailing winds, mountains, latitude, distance from the sea, elevation), specific to THIS place rather than generic to its climate type. If a cause is not shown by the data, present it as the usual explanation ("This is mainly because…") without overstating certainty.
-If the question is not about climate, weather, geography or this site, politely steer back to the place. If the data cannot answer it, say so briefly.`;
+Answer the visitor's question in plain English for a curious non-expert, in at most 120 words. Plain text only: no markdown, headings or bullet lists.
+DATA holds the place the visitor is looking at. You can see the whole globe through your tools: place_climate (any town by name), point_climate (any latitude/longitude), similar_places (where else has this climate), extreme_places (the wettest, sunniest, coldest… towns). Whenever a question involves another place, a comparison, "where else" or a ranking, look it up with a tool before answering. Never say you only have data for this spot, and never tell the visitor to look something up themselves.
+Every number you state must come from DATA or a tool result (say which month or measure). Never invent figures. If you compare or calculate, show the result briefly.
+When the visitor asks to compare two places (or this place with another), answer with the key differences and also call propose_comparison so they can open both side by side in Compare; mention the offer in one short sentence.
+Explain causes with real geography (ocean currents, prevailing winds, mountains, latitude, distance from the sea, elevation), specific to each place rather than generic to its climate type. If a cause is not shown by the data, present it as the usual explanation ("This is mainly because…") without overstating certainty.
+If the question is not about climate, weather, geography or this site, politely steer back to the place. If even the tools cannot answer it, say so briefly.`;
+// src/places.ts
+var fold = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+var PlacesIndex = class {
+	folded;
+	data;
+	constructor(data) {
+		this.data = data;
+		this.folded = data.n.map((n, i) => fold([
+			n,
+			data.a[i] || "",
+			String(data.alt?.[i] || "").replace(/\|/g, " ")
+		].join(" ")));
+	}
+	get length() {
+		return this.data.n.length;
+	}
+	place(i) {
+		const d = this.data;
+		return {
+			index: i,
+			name: d.n[i],
+			country: d.countries[d.c[i]],
+			admin: d.admins[d.r[i]],
+			coordinates: [d.x[i] / 1e3, d.y[i] / 1e3],
+			population: d.p[i]
+		};
+	}
+	/** Prefix matches on a town's name (any word), optionally narrowed by country/region after a comma. Largest first. */
+	search(query, limit = 8) {
+		const [townPart, ...rest] = query.split(",");
+		const q = fold(townPart), where = fold(rest.join(" "));
+		if (!q) return [];
+		const exact = [], prefix = [], word = [];
+		for (let i = 0; i < this.folded.length && exact.length + prefix.length < limit * 4; i++) {
+			const f = this.folded[i];
+			if (!f.includes(q)) continue;
+			if (where) {
+				if (!fold(`${this.data.countries[this.data.c[i]]} ${this.data.admins[this.data.r[i]]}`).includes(where)) continue;
+			}
+			if (fold(this.data.n[i]) === q) exact.push(i);
+			else if (f.startsWith(q)) prefix.push(i);
+			else if (f.includes(" " + q)) word.push(i);
+		}
+		return [
+			...exact,
+			...prefix,
+			...word
+		].slice(0, limit).map((i) => this.place(i));
+	}
+	/** Nearest towns by great-circle distance (all towns scanned; ~65k is fast enough). */
+	nearest([lon, lat], count = 1) {
+		const best = [];
+		const cosLat = Math.cos(lat * (Math.PI / 180));
+		for (let i = 0; i < this.data.n.length; i++) {
+			const dy = this.data.y[i] / 1e3 - lat, dx = ((this.data.x[i] / 1e3 - lon + 540) % 360 - 180) * cosLat;
+			const approx = dx * dx + dy * dy;
+			if (best.length === count && approx >= best[count - 1].d) continue;
+			best.push({
+				i,
+				d: approx
+			});
+			best.sort((a, b) => a.d - b.d);
+			if (best.length > count) best.pop();
+		}
+		return best.map(({ i }) => ({
+			...this.place(i),
+			km: haversineKm([lon, lat], this.place(i).coordinates)
+		}));
+	}
+	/** Towns whose point lies inside a lon/lat box, largest first. */
+	within([w, s, e, n], limit = 5) {
+		const out = [];
+		for (let i = 0; i < this.data.n.length && out.length < limit; i++) {
+			const x = this.data.x[i] / 1e3, y = this.data.y[i] / 1e3;
+			if (y >= s && y < n && x >= w && x < e) out.push(this.place(i));
+		}
+		return out;
+	}
+};
+function haversineKm([lon1, lat1], [lon2, lat2]) {
+	const r = Math.PI / 180, dlat = (lat2 - lat1) * r, dlon = (lon2 - lon1) * r;
+	const h = Math.sin(dlat / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dlon / 2) ** 2;
+	return 12742 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+var placeLabel = (p) => p.country && p.country !== p.name ? `${p.name}, ${p.country}` : p.name;
+// api/tools.ts
+/**
+* Tools that let ClimaClue's chat look at the whole globe, using only ClimaClue's own data files:
+* any town or point (full monthly data), places with a similar climate, places at the extremes of a
+* measure, and a comparison proposal that the visitor approves or declines in the chat.
+*/
+var towns = null;
+var townsOf = (env) => towns ??= new PlacesIndex(JSON.parse(readFileSync(`${env.data}/site/places/places-v1.json`, "utf8")));
+var grids = /* @__PURE__ */ new Map();
+var mapsIndex = null;
+var GRID = {
+	lon0: -180.00013888885002,
+	lat0: 83.99986041515,
+	cell: .0999999996
+};
+function grid(env, layer) {
+	if (grids.has(layer)) return grids.get(layer);
+	mapsIndex ??= JSON.parse(readFileSync(`${env.data}/squares/maps.json`, "utf8"));
+	const info = mapsIndex.layers[layer], path = info && `${env.data}/squares/${info.file}`;
+	if (!path || !existsSync(path)) return null;
+	const g = {
+		bytes: new Uint8Array(readFileSync(path)),
+		rows: mapsIndex.rows,
+		cols: mapsIndex.cols,
+		scale: mapsIndex.scales[layer]
+	};
+	grids.set(layer, g);
+	return g;
+}
+function cellValue(g, lon, lat) {
+	const r = Math.floor((GRID.lat0 - lat) / GRID.cell), c = Math.floor((lon - GRID.lon0) / GRID.cell);
+	if (r < 0 || r >= g.rows || c < 0 || c >= g.cols) return null;
+	const v = g.bytes[r * g.cols + c];
+	if (!v) return null;
+	if (!g.scale) return v;
+	let t = (v - 1) / 254;
+	if (g.scale.curve === "sqrt") t *= t;
+	return g.scale.min + t * (g.scale.max - g.scale.min);
+}
+async function squareFor(env, lon, lat) {
+	const r = await squareAt([lon, lat], env.fetcher);
+	return r.status === "land" ? r.square : null;
+}
+var round1 = (v) => Math.round(v * 10) / 10;
+var brief = (s) => {
+	const sum = (v) => v.every((x) => x !== null) ? round1(v.reduce((a, b) => a + b, 0)) : null;
+	const t = s.layers.tas.mean;
+	return {
+		annual_mean_temp_C: t.every((x) => x !== null) ? round1(t.reduce((a, b) => a + b, 0) / 12) : null,
+		yearly_precip_mm: sum(s.layers.pr.mean),
+		yearly_sunshine_h: sum(s.layers.sun.mean),
+		yearly_snowfall_mm_water: sum(s.layers.sf.mean)
+	};
+};
+var MEASURES = {
+	temperature: {
+		layer: "temperature",
+		label: "annual mean temperature (°C)"
+	},
+	rain: {
+		layer: "rain",
+		label: "yearly precipitation (mm)"
+	},
+	sunshine: {
+		layer: "sunshine",
+		label: "yearly sunshine (hours)"
+	},
+	wind: {
+		layer: "wind",
+		label: "mean wind (m/s)"
+	},
+	humidity: {
+		layer: "humidity",
+		label: "mean relative humidity (%)"
+	},
+	snow: {
+		layer: "snow",
+		label: "yearly snowfall (mm water)"
+	}
+};
+var TOOLS = [
+	{
+		name: "place_climate",
+		strict: true,
+		description: "Full ClimaClue climate data (monthly temperature, night lows, day highs, precipitation, snow, sunshine, wind, humidity, dew point, climate type, station records) for any town or city on Earth, by name. Use it whenever the visitor mentions a place other than the one in DATA. Add the country after a comma when a name is ambiguous (\"Portland, United States\").",
+		input_schema: {
+			type: "object",
+			properties: { place: {
+				type: "string",
+				description: "Town or city name, optionally \", country\""
+			} },
+			required: ["place"],
+			additionalProperties: false
+		}
+	},
+	{
+		name: "point_climate",
+		strict: true,
+		description: "Full ClimaClue climate data for the 0.1° area at any latitude/longitude on land (mountains, regions, places without a town in the list).",
+		input_schema: {
+			type: "object",
+			properties: {
+				lat: { type: "number" },
+				lon: { type: "number" },
+				label: {
+					type: "string",
+					description: "What to call this spot"
+				}
+			},
+			required: [
+				"lat",
+				"lon",
+				"label"
+			],
+			additionalProperties: false
+		}
+	},
+	{
+		name: "similar_places",
+		strict: true,
+		description: "Towns worldwide (at least 300 km away) with the same climate type and the closest annual temperature and precipitation to a given point, with their real numbers. Use for \"where else has a climate like this?\".",
+		input_schema: {
+			type: "object",
+			properties: {
+				lat: { type: "number" },
+				lon: { type: "number" },
+				count: {
+					type: "integer",
+					description: "1 to 8"
+				},
+				country: {
+					type: "string",
+					description: "Optional country to search within, or empty for worldwide"
+				}
+			},
+			required: [
+				"lat",
+				"lon",
+				"count",
+				"country"
+			],
+			additionalProperties: false
+		}
+	},
+	{
+		name: "extreme_places",
+		strict: true,
+		description: "The largest towns (over 100,000 people) with the highest or lowest value of a measure, worldwide or in one country. Use for \"where is the wettest/sunniest/coldest…\".",
+		input_schema: {
+			type: "object",
+			properties: {
+				measure: {
+					type: "string",
+					enum: Object.keys(MEASURES)
+				},
+				direction: {
+					type: "string",
+					enum: ["highest", "lowest"]
+				},
+				country: {
+					type: "string",
+					description: "Country name, or empty for worldwide"
+				},
+				count: {
+					type: "integer",
+					description: "1 to 8"
+				}
+			},
+			required: [
+				"measure",
+				"direction",
+				"country",
+				"count"
+			],
+			additionalProperties: false
+		}
+	},
+	{
+		name: "propose_comparison",
+		strict: true,
+		description: "Offer to open ClimaClue's Compare view with two places side by side. The visitor sees a card with Yes / No buttons; nothing happens unless they approve. Use it whenever the visitor asks to compare two places (or this place with another). Coordinates must come from DATA or from a place_climate / point_climate result.",
+		input_schema: {
+			type: "object",
+			properties: {
+				a_name: { type: "string" },
+				a_lat: { type: "number" },
+				a_lon: { type: "number" },
+				b_name: { type: "string" },
+				b_lat: { type: "number" },
+				b_lon: { type: "number" }
+			},
+			required: [
+				"a_name",
+				"a_lat",
+				"a_lon",
+				"b_name",
+				"b_lat",
+				"b_lon"
+			],
+			additionalProperties: false
+		}
+	}
+];
+var ok = (v) => JSON.stringify(v);
+var fail = (message) => ({ error: message });
+var num$1 = (v, lo, hi) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi;
+var clampCount = (v) => Math.max(1, Math.min(8, Math.round(Number(v) || 5)));
+var matchCountry = (p, country) => !country || p.country.toLowerCase().includes(country.toLowerCase().trim());
+/** Runs one tool call; returns the JSON text for the tool_result (errors as {error}) and any comparison proposal. */
+async function runTool(env, name, input) {
+	try {
+		if (name === "place_climate") {
+			const q = String(input.place ?? "").slice(0, 80), hits = townsOf(env).search(q, 5);
+			if (!hits.length) return {
+				content: ok(fail(`No town called "${q}" in ClimaClue's town list. Try a nearby larger town, or point_climate with coordinates.`)),
+				isError: true
+			};
+			const p = hits[0], [lon, lat] = p.coordinates, s = await squareFor(env, lon, lat);
+			if (!s) return {
+				content: ok(fail(`${placeLabel(p)} has no land climate data (sea or a tiny island).`)),
+				isError: true
+			};
+			return { content: ok({
+				resolved: placeLabel(p),
+				latitude: lat,
+				longitude: lon,
+				population: p.population,
+				other_matches: hits.slice(1).map(placeLabel),
+				data: placeContext(placeLabel(p), s, env.stations)
+			}) };
+		}
+		if (name === "point_climate") {
+			if (!num$1(input.lat, -90, 90) || !num$1(input.lon, -180, 180)) return {
+				content: ok(fail("Latitude or longitude out of range.")),
+				isError: true
+			};
+			const s = await squareFor(env, input.lon, input.lat);
+			if (!s) return {
+				content: ok(fail("No land climate data at that point (sea, or outside the land data).")),
+				isError: true
+			};
+			const label = String(input.label || "this spot").slice(0, 80), near = townsOf(env).nearest([input.lon, input.lat], 1)[0];
+			return { content: ok({
+				nearest_town: near ? `${placeLabel(near)}, ${Math.round(near.km)} km away` : null,
+				data: placeContext(label, s, env.stations)
+			}) };
+		}
+		if (name === "similar_places") {
+			if (!num$1(input.lat, -90, 90) || !num$1(input.lon, -180, 180)) return {
+				content: ok(fail("Latitude or longitude out of range.")),
+				isError: true
+			};
+			const lat = input.lat, lon = input.lon, count = clampCount(input.count), country = String(input.country ?? "");
+			const cl = grid(env, "climate"), te = grid(env, "temperature"), ra = grid(env, "rain");
+			if (!cl || !te || !ra) return {
+				content: ok(fail("Worldwide search is unavailable right now.")),
+				isError: true
+			};
+			const code = cellValue(cl, lon, lat), t0 = cellValue(te, lon, lat), r0 = cellValue(ra, lon, lat);
+			if (code === null || t0 === null || r0 === null) return {
+				content: ok(fail("No climate data at that point to match against.")),
+				isError: true
+			};
+			const idx = townsOf(env), cands = [];
+			for (let i = 0; i < idx.length && i < 4e4; i++) {
+				const p = idx.place(i);
+				if (!matchCountry(p, country)) continue;
+				const [x, y] = p.coordinates;
+				if (cellValue(cl, x, y) !== code) continue;
+				const t = cellValue(te, x, y), r = cellValue(ra, x, y);
+				if (t === null || r === null) continue;
+				if (haversineKm([lon, lat], [x, y]) < 300) continue;
+				cands.push({
+					p,
+					score: Math.abs(t - t0) / 2 + Math.abs(Math.sqrt(r) - Math.sqrt(r0)) / 3
+				});
+			}
+			cands.sort((a, b) => a.score - b.score);
+			const picked = [], perCountry = /* @__PURE__ */ new Map();
+			for (const c of cands) {
+				if (picked.length >= count) break;
+				const n = perCountry.get(c.p.country) ?? 0;
+				if (!country && n >= 2) continue;
+				perCountry.set(c.p.country, n + 1);
+				picked.push(c.p);
+			}
+			const results = [];
+			for (const p of picked) {
+				const s = await squareFor(env, ...p.coordinates);
+				if (s) results.push({
+					place: placeLabel(p),
+					latitude: p.coordinates[1],
+					longitude: p.coordinates[0],
+					population: p.population,
+					...brief(s)
+				});
+			}
+			return { content: ok({
+				climate_type_code: mapsIndex.codes[code - 1],
+				searched: `${Math.min(idx.length, 4e4)} largest towns${country ? ` in ${country}` : ""}`,
+				results
+			}) };
+		}
+		if (name === "extreme_places") {
+			const m = MEASURES[String(input.measure)];
+			if (!m) return {
+				content: ok(fail("Unknown measure.")),
+				isError: true
+			};
+			const g = grid(env, m.layer);
+			if (!g) return {
+				content: ok(fail("That measure is unavailable right now.")),
+				isError: true
+			};
+			const high = input.direction !== "lowest", count = clampCount(input.count), country = String(input.country ?? ""), idx = townsOf(env);
+			const rows = [];
+			for (let i = 0; i < idx.length; i++) {
+				const p = idx.place(i);
+				if (p.population < 1e5) continue;
+				if (!matchCountry(p, country)) continue;
+				const v = cellValue(g, ...p.coordinates);
+				if (v !== null) rows.push({
+					p,
+					v
+				});
+			}
+			rows.sort((a, b) => high ? b.v - a.v : a.v - b.v);
+			const results = [];
+			for (const { p } of rows.slice(0, count)) {
+				const s = await squareFor(env, ...p.coordinates);
+				if (s) results.push({
+					place: placeLabel(p),
+					latitude: p.coordinates[1],
+					longitude: p.coordinates[0],
+					population: p.population,
+					...brief(s)
+				});
+			}
+			return { content: ok({
+				measure: m.label,
+				direction: high ? "highest" : "lowest",
+				among: `${rows.length} towns over 100,000 people${country ? ` in ${country}` : " worldwide"}`,
+				results
+			}) };
+		}
+		if (name === "propose_comparison") {
+			const a = {
+				name: String(input.a_name ?? "").slice(0, 80),
+				lat: input.a_lat,
+				lon: input.a_lon
+			};
+			const b = {
+				name: String(input.b_name ?? "").slice(0, 80),
+				lat: input.b_lat,
+				lon: input.b_lon
+			};
+			if (![a, b].every((p) => num$1(p.lat, -90, 90) && num$1(p.lon, -180, 180))) return {
+				content: ok(fail("Coordinates out of range.")),
+				isError: true
+			};
+			if (!await squareFor(env, a.lon, a.lat) || !await squareFor(env, b.lon, b.lat)) return {
+				content: ok(fail("One of those points has no land climate data.")),
+				isError: true
+			};
+			return {
+				content: ok({
+					shown_to_visitor: true,
+					note: "A card with Yes / No is shown under your answer. Mention it in one short sentence; do not claim the comparison is already open."
+				}),
+				proposal: {
+					a,
+					b
+				}
+			};
+		}
+		return {
+			content: ok(fail(`Unknown tool ${name}`)),
+			isError: true
+		};
+	} catch {
+		return {
+			content: ok(fail("That lookup failed.")),
+			isError: true
+		};
+	}
+}
 // api/server.ts
 /**
 * ClimaClue chat service (runs on the Hetzner server behind Caddy at /api/*, port 127.0.0.1:8090).
@@ -27451,18 +27924,56 @@ async function answer(places, question, tab, history) {
 		role: "user",
 		content: `DATA (from ClimaClue's own layers):\n${JSON.stringify(data)}\n\nThe visitor is on the ${tab} tab, looking at: ${places.map((p) => p.name).join(" and ")}.\nQuestion: ${question}`
 	});
-	const r = await client.beta.messages.create({
-		model: MODEL,
-		max_tokens: 2e3,
-		system: SYSTEM,
-		output_config: { effort: "medium" },
-		messages,
-		betas: ["server-side-fallback-2026-07-01"],
-		fallbacks: "default"
-	});
-	addSpend((r.usage.input_tokens * PRICE_IN + r.usage.output_tokens * PRICE_OUT) / 1e6);
-	if (r.stop_reason === "refusal") return "Sorry, I can’t help with that one. Ask me about this place’s climate instead.";
-	return r.content.filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+	let proposal = null;
+	for (let round = 0; round < 6; round++) {
+		const r = await client.beta.messages.create({
+			model: MODEL,
+			max_tokens: 4e3,
+			system: SYSTEM,
+			output_config: { effort: "medium" },
+			messages,
+			tools: TOOLS,
+			betas: ["server-side-fallback-2026-07-01"],
+			fallbacks: "default"
+		});
+		addSpend((r.usage.input_tokens * PRICE_IN + r.usage.output_tokens * PRICE_OUT) / 1e6);
+		if (r.stop_reason === "refusal") return {
+			text: "Sorry, I can’t help with that one. Ask me about this place’s climate instead.",
+			proposal: null
+		};
+		const text = r.content.filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+		if (r.stop_reason !== "tool_use") return {
+			text,
+			proposal
+		};
+		messages.push({
+			role: "assistant",
+			content: r.content
+		});
+		const calls = r.content.filter((b) => b.type === "tool_use");
+		const results = await Promise.all(calls.map(async (c) => {
+			const out = await runTool({
+				data: DATA,
+				fetcher: fileFetcher,
+				stations
+			}, c.name, c.input ?? {});
+			if (out.proposal) proposal = out.proposal;
+			return {
+				type: "tool_result",
+				tool_use_id: c.id,
+				content: out.content,
+				...out.isError ? { is_error: true } : {}
+			};
+		}));
+		messages.push({
+			role: "user",
+			content: results
+		});
+	}
+	return {
+		text: "That needed more lookups than I can do in one answer. Try asking about one or two places at a time.",
+		proposal
+	};
 }
 var json = (res, status, body) => {
 	res.writeHead(status, {
@@ -27507,7 +28018,7 @@ async function handle(req, res) {
 		square: await load(p)
 	})))).filter((p) => !!p.square);
 	if (!ok.length) return json(res, 422, { error: "No climate data for that place" });
-	const key = body.suggestionId && ok.length === 1 && !history.length ? `${ok[0].square.id}|${tab}|${body.suggestionId}` : null;
+	const key = body.suggestionId && ok.length === 1 && !history.length ? `v2|${ok[0].square.id}|${tab}|${body.suggestionId}` : null;
 	if (key && stored.has(key)) return json(res, 200, {
 		answer: stored.get(key),
 		stored: true
@@ -27516,11 +28027,12 @@ async function handle(req, res) {
 	if (overCap()) return json(res, 503, { error: "ClimaClue has answered all the questions it can this month. Suggested questions for big cities still work." });
 	if (!allow(String(req.headers["cf-connecting-ip"] ?? req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim())) return json(res, 429, { error: `You’ve asked ${PER_VISITOR} questions today. Come back tomorrow for more.` });
 	try {
-		const text = await answer(ok, question, tab, history);
-		if (key) store(key, text);
+		const { text, proposal } = await answer(ok, question, tab, history);
+		if (key && !proposal) store(key, text);
 		return json(res, 200, {
 			answer: text,
-			stored: false
+			stored: false,
+			...proposal ? { compare: proposal } : {}
 		});
 	} catch (e) {
 		const status = e instanceof Anthropic.RateLimitError ? 429 : 502;
@@ -27546,7 +28058,7 @@ async function prewarm(n, perTab) {
 		seen.add(id);
 		const data = placeContext(p.name, square, stations);
 		for (const tab of TABS) for (const s of suggestQuestions(square, tab, towns.n[i]).slice(0, perTab)) {
-			const key = `${square.id}|${tab}|${s.id}`;
+			const key = `v2|${square.id}|${tab}|${s.id}`;
 			if (stored.has(key)) continue;
 			const custom_id = `q${requests.length}`;
 			keys.set(custom_id, key);
