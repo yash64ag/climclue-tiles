@@ -5,3 +5,5 @@ Binary tiles (format `climaclue-squares-v3`) served at `/squares/` by climaclue.
 periods, licences and regeneration. `SHA256SUMS` lists every file's checksum.
 
 Data: CHELSA V2.1 (CC0), ERA5-Land (Copernicus, CC BY 4.0), CRU CL 2.0 sunshine, Natural Earth.
+
+The chat service (server/api) is set up by server/update-shared.sh: systemd unit climaclue-api, key in /etc/climaclue/api.env.
