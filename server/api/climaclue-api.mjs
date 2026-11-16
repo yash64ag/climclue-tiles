@@ -26836,6 +26836,7 @@ var Anthropic = /* @__PURE__ */ (() => {
 })();
 // src/squares.ts
 /** tasmin/tasmax: mean daily minimum and maximum (average night low and day high), tiles v4 onwards. */
+/** sf/sde: ERA5-Land snowfall (mm of water per month) and snow depth on the ground (cm), tiles v6 onwards. */
 var SQUARE_LAYERS = [
 	"tas",
 	"pr",
@@ -26845,7 +26846,9 @@ var SQUARE_LAYERS = [
 	"d2m",
 	"sun",
 	"tasmin",
-	"tasmax"
+	"tasmax",
+	"sf",
+	"sde"
 ];
 var BASE = "/squares/";
 var decode = {
@@ -26857,7 +26860,9 @@ var decode = {
 	d2m: (v) => v * .1 - 273.15,
 	sun: (v) => v * .1,
 	tasmin: (v) => v * .1 - 273.15,
-	tasmax: (v) => v * .1 - 273.15
+	tasmax: (v) => v * .1 - 273.15,
+	sf: (v) => v * .1,
+	sde: (v) => v * .1
 };
 /** Fixed grid of the published tiles (checked against index.json when it loads). */
 var SQUARE_GRID = {
@@ -26879,7 +26884,8 @@ function loadIndex(fetcher = fetch) {
 			if (![
 				"climaclue-squares-v3",
 				"climaclue-squares-v4",
-				"climaclue-squares-v5"
+				"climaclue-squares-v5",
+				"climaclue-squares-v6"
 			].includes(index.format) || index.origin_lon !== SQUARE_GRID.origin_lon || index.origin_lat !== SQUARE_GRID.origin_lat || index.pixel_degrees !== SQUARE_GRID.pixel_degrees || index.square_pixels !== SQUARE_GRID.square_pixels) throw new Error("Unexpected climate tile format");
 			return index;
 		});
@@ -26965,6 +26971,7 @@ function decodeSquare(index, tile, row, col) {
 		seaKm: index.header_u16 > 16 && rec[16] !== index.nodata ? rec[16] : null,
 		sunFallbackKm: index.header_u16 > 17 ? rec[17] : 0,
 		dewFallback: index.header_u16 > 18 && rec[18] === 1,
+		snowFallbackKm: index.header_u16 > 19 ? rec[19] : 0,
 		layers
 	};
 }
@@ -27160,7 +27167,7 @@ var argmax = (v) => v.indexOf(Math.max(...v));
 var argmin = (v) => v.indexOf(Math.min(...v));
 function suggestQuestions(square, tab, town) {
 	const L = square.layers, lat = (square.bounds[1] + square.bounds[3]) / 2, absLat = Math.abs(lat);
-	const t = full(L.tas.mean), p = full(L.pr.mean), sun = full(L.sun.mean), wind = full(L.sfcWind.mean), hum = full(L.hurs.mean), cloud = full(L.clt.mean);
+	const t = full(L.tas.mean), p = full(L.pr.mean), sun = full(L.sun.mean), wind = full(L.sfcWind.mean), hum = full(L.hurs.mean);
 	const lo = full(L.tasmin.mean), hi = full(L.tasmax.mean), dew = full(L.d2m.mean);
 	const sea = square.seaKm ?? 9999, type = t && p ? koppen(t, p, lat) : null, annual = squareAnnualMean(square);
 	const here = town ? town : "here", it = town ? town : "this place";
@@ -27222,10 +27229,18 @@ function suggestQuestions(square, tab, town) {
 		if (Math.min(...hum) < 30) add("very-dry-air", `Why is the air so dry ${here === "here" ? "here" : "in " + here}?`, 8);
 		add("dew-vs-humidity", "What is the difference between humidity and dew point here?", 5);
 	}
-	if (tab === "cloud" && cloud) {
-		if (yearRain !== null && yearRain < 300 && Math.max(...cloud) > 50) add("cloud-no-rain", "Why is it cloudy so often without much rain?", 9);
-		if (Math.max(...cloud) - Math.min(...cloud) > 35) add("cloud-season", `Why is ${MONTHS[argmax(cloud)]} so much cloudier?`, 7);
-		add("cloud-vs-sun", "How does cloud cover relate to the sunshine hours here?", 4);
+	if (tab === "snow") {
+		const sf = full(L.sf.mean), sde = full(L.sde.mean), yearSnow = sf ? sum(sf) : null, coldest = t ? Math.min(...t) : null;
+		if (sf && yearSnow !== null) {
+			if (yearSnow >= 2e3) add("snow-lots", `Why does ${it} get so much snow?`, 9);
+			else if (yearSnow >= 10) add("snow-month", `Why is ${MONTHS[argmax(sf)]} the snowiest month ${here === "here" ? "here" : "in " + here}?`, 6);
+			if (yearSnow < 10 && coldest !== null && coldest < -3) add("cold-no-snow", `Why does ${it} get so little snow even though it is cold?`, 9);
+			else if (yearSnow < 10 && coldest !== null && coldest < 8) add("rare-snow", `How rare is snow ${here === "here" ? "here" : "in " + here}?`, 7);
+			else if (yearSnow < 10) add("never-snow", `Has it ever snowed ${here === "here" ? "here" : "in " + here}?`, 6);
+			if (sde && yearSnow >= 100 && sde.filter((v) => v >= 1).length <= 1) add("snow-melts", "Why does the snow not stay on the ground for long?", 8);
+			if (sde && sde.filter((v) => v >= 1).length >= 6) add("snow-stays", "Why does snow stay on the ground for so many months?", 7);
+			if (yearSnow >= 10) add("snow-vs-rain", "How much of the yearly precipitation falls as snow?", 4);
+		}
 	}
 	if (out.length === 0) add("why-general", `Why is ${it}'s climate like this?`, 1);
 	return out.sort((a, b) => b.score - a.score).slice(0, 3);
@@ -27297,19 +27312,23 @@ function placeContext(name, square, stations) {
 			wind_m_s: L.sfcWind.mean.map(r1),
 			relative_humidity_pct: L.hurs.mean.map(r1),
 			cloud_cover_pct: L.clt.mean.map(r1),
-			dew_point_C: L.d2m.mean.map(r1)
+			dew_point_C: L.d2m.mean.map(r1),
+			snowfall_mm_water_equivalent: L.sf.mean.map(r1),
+			avg_snow_depth_on_ground_cm: L.sde.mean.map(r1)
 		},
 		temp_variation_within_area_C: L.tas.min.map((v, i) => v === null || L.tas.max[i] === null ? null : r1(L.tas.max[i] - v)),
 		notes: [
 			square.sunFallbackKm ? `sunshine taken from the nearest source cell ${square.sunFallbackKm} km away` : null,
 			square.dewFallback ? "dew point from the coarser ERA5 grid" : null,
+			"snowfall: 1 mm water equivalent is roughly 1 cm of fresh snow (the site shows that estimate); ~9 km cells smooth out mountains",
+			square.snowFallbackKm ? `snow taken from the nearest land cell ${square.snowFallbackKm} km away` : null,
 			lat < -60 ? "Antarctica: very few weather stations, values are model estimates" : null
 		].filter(Boolean),
 		station_records: {
 			high: rec(hi),
 			low: rec(lo)
 		},
-		sources: "CHELSA V2.1 1981-2010 (temperature, precipitation, wind, humidity, cloud); ERA5-Land dew point 1981-2010; CRU CL 2.0 sunshine about 1961-1990; NOAA GHCN-Daily station records"
+		sources: "CHELSA V2.1 1981-2010 (temperature, precipitation, wind, humidity, cloud); ERA5-Land dew point, snowfall and snow depth 1981-2010; CRU CL 2.0 sunshine about 1961-1990; NOAA GHCN-Daily station records"
 	};
 }
 var SYSTEM = `You are ClimaClue, the friendly guide on climaclue.com, a globe where people explore the climate of any place on Earth.
@@ -27344,7 +27363,7 @@ var TABS = [
 	"sunshine",
 	"wind",
 	"humidity",
-	"cloud"
+	"snow"
 ];
 mkdirSync(STATE, { recursive: true });
 var fileFetcher = (async (url) => {
