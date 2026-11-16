@@ -26987,10 +26987,10 @@ function undeltaColumns(columns, count, width) {
 	}
 	return rows;
 }
-function loadTile(name, format, width, fetcher) {
+function loadTile(name, format, width, fetcher, sha = "") {
 	let promise = tileCache.get(name);
 	if (!promise) {
-		promise = fetcher(`${BASE}${name}?f=${encodeURIComponent(format)}`).then(async (r) => {
+		promise = fetcher(`${BASE}${name}?f=${encodeURIComponent(format)}${sha ? `&v=${sha.slice(0, 12)}` : ""}`).then(async (r) => {
 			if (r.status === 404) return null;
 			if (!r.ok) throw new Error(`Climate tile unavailable (${r.status})`);
 			const buffer = await r.arrayBuffer();
@@ -27015,7 +27015,7 @@ async function squareAt(coordinates, fetcher = fetch) {
 		if (!address) return { status: "none" };
 		const name = `t${Math.floor(address.row / index.tile_squares)}_${Math.floor(address.col / index.tile_squares)}.bin`;
 		if (!index.tiles[name]) return { status: "none" };
-		const tile = await loadTile(name, index.format, index.record_u16, fetcher);
+		const tile = await loadTile(name, index.format, index.record_u16, fetcher, index.tiles[name].sha256);
 		const square = tile ? decodeSquare(index, tile, address.row, address.col) : null;
 		return square ? {
 			status: "land",
