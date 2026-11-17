@@ -13,12 +13,6 @@
 		}
 	}
 	header X-Content-Type-Options "nosniff"
-	# One address per page for search engines: www and plain-http visitors go to https://climaclue.com (301).
-	# The http check reads Cloudflare's X-Forwarded-Proto, so a request Cloudflare already made over https never loops.
-	@www host www.climaclue.com
-	redir @www https://climaclue.com{uri} permanent
-	@plainhttp header X-Forwarded-Proto http
-	redir @plainhttp https://climaclue.com{uri} permanent
 	# ClimaClue's chat service (holds the API key; see climaclue-api.service).
 	handle /api/* {
 		reverse_proxy 127.0.0.1:8090
@@ -36,16 +30,6 @@
 	handle {
 		root * /srv/climaclue/public/site
 		header Cache-Control "public, max-age=0, must-revalidate"
-		# Pages live at folder addresses ending in "/": /climate/france/paris and .../index.html redirect there (301).
-		@indexfile path_regexp idx ^(.*/)index\.html$
-		redir @indexfile {re.idx.1} permanent
-		@folder {
-			not path */
-			file {
-				try_files {path}/index.html
-			}
-		}
-		redir @folder {path}/ permanent
 		try_files {path} {path}/index.html
 		file_server
 	}
@@ -60,7 +44,5 @@ http://climaclue.com, http://www.climaclue.com {
 }
 climaclue.com, www.climaclue.com {
 	tls internal
-	# Browsers keep to https (one day for now; raise once everything is confirmed over https).
-	header Strict-Transport-Security "max-age=86400"
 	import climaclue_site
 }
