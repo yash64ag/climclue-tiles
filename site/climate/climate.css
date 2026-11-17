@@ -47,3 +47,7 @@ ul.towns li{margin:3px 0}
 footer{border-top:1px solid #e3d6c0;max-width:860px;margin:0 auto;padding:16px 16px 40px;font-size:14px;color:#5d6a70}
 footer h2{font-size:17px;margin:4px 0 6px}
 @media (max-width:560px){h1{font-size:25px}th,td{padding:5px 6px;font-size:14px}.brand{font-size:18px}}
+.pn{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 16px;margin:24px 0 6px}
+.months{display:flex;flex-wrap:wrap;gap:4px 12px;margin:6px 0 16px}
+section h3{margin-top:22px}
+section p{margin:4px 0}

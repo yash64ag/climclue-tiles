@@ -1,5 +1,9 @@
 User-agent: *
 Allow: /
+# App internals and data files: not pages (like ToneMirror, crawlers spend their time on content pages).
 Disallow: /squares/
+Disallow: /api/
+Disallow: /games/*.json
+Disallow: /matchmaker/
 
 Sitemap: https://climaclue.com/sitemap.xml
