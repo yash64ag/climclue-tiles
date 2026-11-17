@@ -27436,7 +27436,7 @@ function placeContext(name, square, stations, snowStations = null) {
 }
 var SYSTEM = `You are ClimaClue, the friendly guide on climaclue.com, a globe where people explore the climate of any place on Earth.
 Answer the visitor's question in plain English for a curious non-expert, in at most 120 words. Plain text only: no markdown, headings, bullet points or dashes at the start of lines; write in sentences. When listing places, name at most four, in one or two sentences.
-DATA holds the place the visitor is looking at. You can see the whole globe through your tools: place_climate (any town by name), point_climate (any latitude/longitude), similar_places (where else has this climate), extreme_places (the wettest, sunniest, coldest… towns). Whenever a question involves another place, a comparison, "where else" or a ranking, look it up with a tool before answering. Never say you only have data for this spot, and never tell the visitor to look something up themselves.
+DATA holds the place the visitor is looking at. You can see the whole globe through your tools: place_climate (any town by name), point_climate (any latitude/longitude), similar_places (where else has this climate), extreme_places (the wettest, sunniest, coldest… towns of 100,000+ people), map_extremes (every land area on the globe, not just towns: "the whole map", "anywhere on Earth", or a region given as a latitude/longitude box). "This map" or "the whole map" means the whole globe. When your answer centres on one other place (one you found or the visitor asked about), call propose_explore so they can open it in Explore; when it compares two places, use propose_comparison instead. Whenever a question involves another place, a comparison, "where else" or a ranking, look it up with a tool before answering. Never say you only have data for this spot, and never tell the visitor to look something up themselves.
 Every number you state must come from DATA or a tool result (say which month or measure). Never invent figures. If you compare or calculate, show the result briefly.
 When the visitor asks to compare two places (or this place with another): look up the other place with place_climate and call propose_comparison (so they can open both side by side), then, after all tool calls, write the comparison with real numbers from both places; the offer never replaces the answer. Mention the offer in one short closing sentence.
 Explain causes with real geography (ocean currents, prevailing winds, mountains, latitude, distance from the sea, elevation), specific to each place rather than generic to its climate type. If a cause is not shown by the data, present it as the usual explanation ("This is mainly because…") without overstating certainty.
@@ -27609,6 +27609,25 @@ var brief = (s) => {
 		yearly_snowfall_mm_water: sum(s.layers.sf.mean)
 	};
 };
+/** The exact yearly value of a measure from an area's full data (sums for amounts, averages otherwise). */
+function exactValue(s, layer) {
+	const key = {
+		temperature: "tas",
+		rain: "pr",
+		sunshine: "sun",
+		wind: "sfcWind",
+		humidity: "hurs",
+		snow: "sf"
+	}[layer];
+	const v = key ? s.layers[key].mean : null;
+	if (!v || !v.every((x) => x !== null)) return null;
+	const total = v.reduce((a, b) => a + b, 0);
+	return round1([
+		"rain",
+		"sunshine",
+		"snow"
+	].includes(layer) ? total : total / 12);
+}
 var MEASURES = {
 	temperature: {
 		layer: "temperature",
@@ -27728,6 +27747,76 @@ var TOOLS = [
 				"direction",
 				"country",
 				"count"
+			],
+			additionalProperties: false
+		}
+	},
+	{
+		name: "map_extremes",
+		strict: true,
+		description: "Search EVERY land area on the globe (about 2 million 0.1° areas, not just towns) for the highest or lowest yearly value of a measure, optionally inside a latitude/longitude box (e.g. a continent or region). Returns distinct spots at least 300 km apart with their exact values and nearest town. Use for \"where on the whole map / anywhere on Earth is the driest, coldest, sunniest…\". Use extreme_places instead when the visitor asks about towns or cities.",
+		input_schema: {
+			type: "object",
+			properties: {
+				measure: {
+					type: "string",
+					enum: Object.keys(MEASURES)
+				},
+				direction: {
+					type: "string",
+					enum: ["highest", "lowest"]
+				},
+				count: {
+					type: "integer",
+					description: "1 to 8"
+				},
+				south: {
+					type: "number",
+					description: "Box: southern latitude, or -90 for the whole globe"
+				},
+				north: {
+					type: "number",
+					description: "Box: northern latitude, or 90"
+				},
+				west: {
+					type: "number",
+					description: "Box: western longitude, or -180"
+				},
+				east: {
+					type: "number",
+					description: "Box: eastern longitude, or 180"
+				}
+			},
+			required: [
+				"measure",
+				"direction",
+				"count",
+				"south",
+				"north",
+				"west",
+				"east"
+			],
+			additionalProperties: false
+		}
+	},
+	{
+		name: "propose_explore",
+		strict: true,
+		description: "Offer to open one place in ClimaClue's Explore view (the globe flies there and shows its full climate profile). The visitor sees a card with Yes / No buttons; nothing happens unless they approve. Use it when your answer centres on a place other than the one the visitor is looking at (for example the driest spot you found, or a town they asked about), once per answer, for the main place only. Do not use it together with propose_comparison.",
+		input_schema: {
+			type: "object",
+			properties: {
+				name: {
+					type: "string",
+					description: "Plain name, e.g. \"Arica, Chile\" or \"Near Arica, Chile\""
+				},
+				lat: { type: "number" },
+				lon: { type: "number" }
+			},
+			required: [
+				"name",
+				"lat",
+				"lon"
 			],
 			additionalProperties: false
 		}
@@ -27899,6 +27988,112 @@ async function runTool(env, name, input) {
 				among: `${rows.length} towns over 100,000 people${country ? ` in ${country}` : " worldwide"}`,
 				results
 			}) };
+		}
+		if (name === "map_extremes") {
+			const m = MEASURES[String(input.measure)];
+			if (!m) return {
+				content: ok(fail("Unknown measure.")),
+				isError: true
+			};
+			const g = grid(env, m.layer);
+			if (!g) return {
+				content: ok(fail("That measure is unavailable right now.")),
+				isError: true
+			};
+			const high = input.direction !== "lowest", count = clampCount(input.count);
+			const S = num$1(input.south, -90, 90) ? input.south : -90, N = num$1(input.north, -90, 90) ? input.north : 90;
+			const W = num$1(input.west, -180, 180) ? input.west : -180, E = num$1(input.east, -180, 180) ? input.east : 180;
+			const inLon = (lon) => W <= E ? lon >= W && lon <= E : lon >= W || lon <= E;
+			const hist = /* @__PURE__ */ new Uint32Array(256), cellLon = (c) => GRID.lon0 + (c + .5) * GRID.cell, cellLat = (r) => GRID.lat0 - (r + .5) * GRID.cell;
+			let land = 0;
+			for (let r = 0; r < g.rows; r++) {
+				const lat = cellLat(r);
+				if (lat < S || lat > N) continue;
+				for (let c = 0; c < g.cols; c++) {
+					const v = g.bytes[r * g.cols + c];
+					if (v && inLon(cellLon(c))) {
+						hist[v]++;
+						land++;
+					}
+				}
+			}
+			if (!land) return {
+				content: ok(fail("No land in that box.")),
+				isError: true
+			};
+			let cut = high ? 255 : 1, kept = hist[cut];
+			while (kept < 3e3 && (high ? cut > 1 : cut < 255)) {
+				cut += high ? -1 : 1;
+				kept += hist[cut];
+			}
+			const cands = [];
+			for (let r = 0; r < g.rows; r++) {
+				const lat = cellLat(r);
+				if (lat < S || lat > N) continue;
+				for (let c = 0; c < g.cols; c++) {
+					const v = g.bytes[r * g.cols + c], lon = cellLon(c);
+					if (v && (high ? v >= cut : v <= cut) && inLon(lon)) cands.push({
+						lon,
+						lat,
+						v
+					});
+				}
+			}
+			cands.sort((a, b) => high ? b.v - a.v : a.v - b.v);
+			const spots = [];
+			for (const c of cands) {
+				if (spots.length >= 24) break;
+				if (spots.every((s2) => haversineKm([s2.lon, s2.lat], [c.lon, c.lat]) >= 300)) spots.push(c);
+			}
+			const found = [];
+			for (const sp of spots) {
+				const s2 = await squareFor(env, sp.lon, sp.lat);
+				const v = s2 ? exactValue(s2, m.layer) : null;
+				if (s2 && v !== null) found.push({
+					...sp,
+					value: v,
+					s: s2
+				});
+			}
+			found.sort((a, b) => high ? b.value - a.value : a.value - b.value);
+			const results = found.slice(0, count).map((f) => {
+				const near = townsOf(env).nearest([f.lon, f.lat], 1)[0];
+				return {
+					latitude: round1(f.lat),
+					longitude: round1(f.lon),
+					value: f.value,
+					nearest_town: near ? `${placeLabel(near)}, ${Math.round(near.km)} km away` : null,
+					...brief(f.s)
+				};
+			});
+			return { content: ok({
+				measure: m.label,
+				direction: high ? "highest" : "lowest",
+				searched: `all ${land.toLocaleString("en")} land areas${S > -90 || N < 90 || W > -180 || E < 180 ? " in the box" : " on the globe"}`,
+				results
+			}) };
+		}
+		if (name === "propose_explore") {
+			const p = {
+				name: String(input.name ?? "").slice(0, 80) || "This place",
+				lat: input.lat,
+				lon: input.lon
+			};
+			if (!num$1(p.lat, -90, 90) || !num$1(p.lon, -180, 180)) return {
+				content: ok(fail("Coordinates out of range.")),
+				isError: true
+			};
+			if (!await squareFor(env, p.lon, p.lat)) return {
+				content: ok(fail("That point has no land climate data.")),
+				isError: true
+			};
+			return {
+				content: ok({
+					shown_to_visitor: true,
+					note: "A Yes / No card to open this place in Explore is shown under your answer. Write your complete final answer now; you may end with one short sentence mentioning the offer."
+				}),
+				explore: p
+			};
 		}
 		if (name === "propose_comparison") {
 			const a = {
@@ -28545,7 +28740,7 @@ async function answer(places, question, tab, history) {
 		role: "user",
 		content: `DATA (from ClimaClue's own layers):\n${JSON.stringify(data)}\n\nThe visitor is on the ${tab} tab, looking at: ${places.map((p) => p.name).join(" and ")}.\nQuestion: ${question}`
 	});
-	let proposal = null;
+	let proposal = null, explore = null;
 	const said = [];
 	for (let round = 0; round < 6; round++) {
 		const r = await client.beta.messages.create({
@@ -28567,7 +28762,8 @@ async function answer(places, question, tab, history) {
 		if (text) said.push(text);
 		if (r.stop_reason !== "tool_use") return {
 			text: said.join("\n\n"),
-			proposal
+			proposal,
+			explore: proposal ? null : explore
 		};
 		messages.push({
 			role: "assistant",
@@ -28582,6 +28778,7 @@ async function answer(places, question, tab, history) {
 				snowStations
 			}, c.name, c.input ?? {});
 			if (out.proposal) proposal = out.proposal;
+			if (out.explore) explore = out.explore;
 			return {
 				type: "tool_result",
 				tool_use_id: c.id,
@@ -28659,12 +28856,13 @@ async function handle(req, res) {
 	if (overCap()) return json(res, 503, { error: "ClimaClue has answered all the questions it can this month. Suggested questions for big cities still work." });
 	if (!allow(clientIp(req))) return json(res, 429, { error: `You’ve asked ${PER_VISITOR} questions today. Come back tomorrow for more.` });
 	try {
-		const { text, proposal } = await answer(ok, question, tab, history);
-		if (key && !proposal) store(key, text);
+		const { text, proposal, explore } = await answer(ok, question, tab, history);
+		if (key && !proposal && !explore) store(key, text);
 		return json(res, 200, {
 			answer: text,
 			stored: false,
-			...proposal ? { compare: proposal } : {}
+			...proposal ? { compare: proposal } : {},
+			...explore ? { explore } : {}
 		});
 	} catch (e) {
 		const status = e instanceof Anthropic.RateLimitError ? 429 : 502;
