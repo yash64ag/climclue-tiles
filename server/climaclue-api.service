@@ -6,6 +6,8 @@ Wants=network-online.target
 [Service]
 ExecStart=/usr/bin/node /srv/climaclue/public/server/api/climaclue-api.mjs
 Environment=CLIMACLUE_DATA=/srv/climaclue/public PORT=8090
+# "Sign in with Google" (accounts): the web Client ID is public by design (it is sent to every browser); no secret is used.
+Environment=CLIMACLUE_GOOGLE_CLIENT_ID=282136409150-vnavso7ml3motbrvdifj09a1h51nm4tt.apps.googleusercontent.com
 # The Anthropic key and monthly cap live here (root-only file, created once by hand).
 EnvironmentFile=-/etc/climaclue/api.env
 StateDirectory=climaclue-api
