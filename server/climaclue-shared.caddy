@@ -12,7 +12,6 @@
 			header Content-Type image/svg+xml*
 		}
 	}
-	header X-Robots-Tag "noindex"
 	header X-Content-Type-Options "nosniff"
 	# ClimaClue's chat service (holds the API key; see climaclue-api.service).
 	handle /api/* {
