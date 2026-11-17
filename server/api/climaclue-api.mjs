@@ -27246,6 +27246,49 @@ function suggestQuestions(square, tab, town) {
 	if (out.length === 0) add("why-general", `Why is ${it}'s climate like this?`, 1);
 	return out.sort((a, b) => b.score - a.score).slice(0, 3);
 }
+/**
+* Suggested questions for the saved-places chat (members): trip-planning questions and a month (0–11), chosen from that month's numbers. ids carry the month
+* (e.g. trip-pack-6) so stored answers and the free-question check stay exact. `other` is a second saved place's name,
+* for the "which suits this month better" question (asked with both places).
+*/
+function tripQuestions(square, town, month, other) {
+	const L = square.layers, m = month, M = MONTHS[m], it = town ?? "this place", out = [];
+	const add = (id, text, score) => out.push({
+		id: `${id}-${m}`,
+		text,
+		score
+	});
+	const v = (x) => x[m] ?? null;
+	const lo = v(L.tasmin.mean), hi = v(L.tasmax.mean), p = v(L.pr.mean), sf = v(L.sf.mean), dew = v(L.d2m.mean), sun = v(L.sun.mean);
+	add("trip-pack", `What should I pack for ${it} in ${M}?`, 10);
+	if (other) add("trip-vs", `Which is better to visit in ${M}: ${it} or ${other}?`, 9.5);
+	if (lo !== null && lo < 3) add("trip-cold", `Will I need gloves, a hat and a warm coat in ${it} in ${M}?`, 9);
+	else if (hi !== null && hi > 31) add("trip-heat", `How hot will ${it} get in ${M}, and how do I cope with the heat?`, 9);
+	if (sf !== null && sf >= 5) add("trip-snow", `Will there be snow in ${it} in ${M}?`, 8.5);
+	if (p !== null && p > 90) add("trip-rain", `Should I bring an umbrella or rain jacket to ${it} in ${M}?`, 8);
+	if (dew !== null && dew > 20) add("trip-sticky", `Will ${it} feel hot and sticky in ${M}?`, 7);
+	if (sun !== null && hi !== null && sun > 250 && hi > 24) add("trip-sun", `How strong is the sun in ${it} in ${M}?`, 6);
+	if (lo !== null && hi !== null && hi - lo > 13) add("trip-layers", `Do I need layers for the cooler evenings in ${it} in ${M}?`, 6.5);
+	const where = town ?? "there";
+	return [
+		...out.sort((a, b) => b.score - a.score).slice(0, 3),
+		{
+			id: "trip-best",
+			text: `What is the best month to visit ${it}?`,
+			score: 5
+		},
+		{
+			id: "trip-lang",
+			text: `What languages do people speak ${town ? `in ${town}` : "here"}?`,
+			score: 4
+		},
+		{
+			id: "trip-move",
+			text: `What would moving to ${where === "there" ? "this place" : where} involve, and how long until I could stay for good?`,
+			score: 3
+		}
+	];
+}
 // src/stations.ts
 var km$1 = ([lon1, lat1], [lon2, lat2]) => {
 	const r = Math.PI / 180, h = Math.sin((lat2 - lat1) * r / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin((lon2 - lon1) * r / 2) ** 2;
@@ -27423,6 +27466,10 @@ function snowRecord(data, at) {
 		} : null
 	};
 }
+/** Added for the saved-places chat (members): any question about their places, not only climate. */
+var SAVED_PLACES_SYSTEM = `This visitor is a member asking about places they saved: planning a trip, a move, or just curious. Here they may ask anything about these places, and this replaces the rule about steering back to climate. Each DATA entry's "near" field says which real town and country the spot is in or near; the place's name is the visitor's own label, so do not treat it as a real place name.
+Climate questions (what to pack, gloves, umbrella, best month, heat, snow): answer from DATA's monthly numbers, stating the numbers you use, with practical advice.
+Other questions (languages, culture, food, time zone, currency, getting around, what moving there involves, residency or citizenship): answer from general knowledge in plain terms and say so briefly. For visas, residency, citizenship, taxes and laws, give the usual picture, say rules change and depend on nationality, and point to that country's official government website. Never invent precise figures you are unsure of; if you do not know, say so.`;
 // src/places.ts
 var fold = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 var PlacesIndex = class {
@@ -28456,8 +28503,36 @@ async function load(p) {
 	const r = await squareAt([p.lon, p.lat], fileFetcher);
 	return r.status === "land" ? r.square : null;
 }
+var townIndex = null;
+function nearTown(lon, lat) {
+	try {
+		townIndex ??= JSON.parse(readFileSync(`${DATA}/site/places/places-v1.json`, "utf8"));
+	} catch {
+		return null;
+	}
+	const t = townIndex, k = Math.cos(lat * Math.PI / 180);
+	let best = -1, bd = Infinity;
+	for (let i = 0; i < t.n.length; i++) {
+		const dx = (t.x[i] / 1e3 - lon) * k, dy = t.y[i] / 1e3 - lat, d = dx * dx + dy * dy;
+		if (d < bd) {
+			bd = d;
+			best = i;
+		}
+	}
+	if (best < 0) return null;
+	const km = Math.round(Math.sqrt(bd) * 111);
+	return `${km < 5 ? "in" : `${km} km from`} ${t.n[best]}, ${t.countries[t.c[best]]}`;
+}
 async function answer(places, question, tab, history) {
-	const data = places.map((p) => placeContext(p.name, p.square, stations, snowStations));
+	const data = places.map((p) => {
+		const ctx = placeContext(p.name, p.square, stations, snowStations);
+		if (tab !== "trip") return ctx;
+		const [w, s, e, n] = p.square.bounds;
+		return {
+			...ctx,
+			near: nearTown((w + e) / 2, (s + n) / 2)
+		};
+	});
 	const messages = [];
 	for (const h of history.slice(-3)) messages.push({
 		role: "user",
@@ -28476,7 +28551,7 @@ async function answer(places, question, tab, history) {
 		const r = await client.beta.messages.create({
 			model: MODEL,
 			max_tokens: 4e3,
-			system: SYSTEM,
+			system: tab === "trip" ? `${SYSTEM}\n${SAVED_PLACES_SYSTEM}` : SYSTEM,
 			output_config: { effort: "medium" },
 			messages,
 			tools: TOOLS,
@@ -28553,7 +28628,7 @@ async function handle(req, res) {
 	} catch {
 		return json(res, 400, { error: "Bad request" });
 	}
-	const question = String(body.question ?? "").trim().slice(0, 300), tab = TABS.includes(body.tab) ? body.tab : "climate";
+	const question = String(body.question ?? "").trim().slice(0, 300), tab = body.tab === "trip" ? "trip" : TABS.includes(body.tab) ? body.tab : "climate";
 	const places = (body.places ?? []).slice(0, 2).filter((p) => p && num(p.lon, -180, 180) && num(p.lat, -90, 90)).map((p) => ({
 		name: String(p.name ?? "this place").slice(0, 80),
 		lon: p.lon,
@@ -28570,10 +28645,12 @@ async function handle(req, res) {
 	})))).filter((p) => !!p.square);
 	if (!ok.length) return json(res, 422, { error: "No climate data for that place" });
 	if (MEMBERSHIP && !accounts.userFor(req)?.member) {
-		const town = places[0].name.split(",")[0], offered = [...suggestQuestions(ok[0].square, tab, null), ...suggestQuestions(ok[0].square, tab, town)];
+		if (tab === "trip") return json(res, 403, { error: "Planning trips with ClimaClue is for members." });
+		const town = places[0].name.split(",")[0], other = places[1]?.name.split(",")[0] ?? null;
+		const offered = tab === "trip" ? Array.from({ length: 12 }, (_, m) => [town, null].flatMap((t) => tripQuestions(ok[0].square, t, m, ok.length > 1 ? other : null))).flat() : [...suggestQuestions(ok[0].square, tab, null), ...suggestQuestions(ok[0].square, tab, town)];
 		if (!body.suggestionId || !offered.some((s) => s.id === body.suggestionId && s.text === question)) return json(res, 403, { error: "Asking your own questions is for members. The suggested questions are free." });
 	}
-	const key = body.suggestionId && ok.length === 1 && !history.length ? `v2|${ok[0].square.id}|${tab}|${body.suggestionId}` : null;
+	const key = body.suggestionId && tab !== "trip" && ok.length === 1 && !history.length ? `v2|${ok[0].square.id}|${tab}|${body.suggestionId}` : null;
 	if (key && stored.has(key)) return json(res, 200, {
 		answer: stored.get(key),
 		stored: true
