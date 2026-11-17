@@ -27913,6 +27913,7 @@ var DATA = process.env.CLIMACLUE_DATA ?? "/srv/climaclue/public";
 var STATE = process.env.STATE_DIRECTORY ?? "/var/lib/climaclue-api";
 var CAP = Number(process.env.CLIMACLUE_MONTHLY_CAP_USD ?? 30);
 var PER_VISITOR = Number(process.env.CLIMACLUE_DAILY_PER_VISITOR ?? 15);
+var MEMBERSHIP = process.env.CLIMACLUE_MEMBERSHIP === "on";
 var TABS = [
 	"climate",
 	"temperature",
@@ -28109,6 +28110,10 @@ async function handle(req, res) {
 		square: await load(p)
 	})))).filter((p) => !!p.square);
 	if (!ok.length) return json(res, 422, { error: "No climate data for that place" });
+	if (MEMBERSHIP) {
+		const town = places[0].name.split(",")[0], offered = [...suggestQuestions(ok[0].square, tab, null), ...suggestQuestions(ok[0].square, tab, town)];
+		if (!body.suggestionId || !offered.some((s) => s.id === body.suggestionId && s.text === question)) return json(res, 403, { error: "Asking your own questions is for members. The suggested questions are free." });
+	}
 	const key = body.suggestionId && ok.length === 1 && !history.length ? `v2|${ok[0].square.id}|${tab}|${body.suggestionId}` : null;
 	if (key && stored.has(key)) return json(res, 200, {
 		answer: stored.get(key),
