@@ -27422,7 +27422,7 @@ function placeContext(name, square, stations, snowStations = null) {
 		notes: [
 			square.sunFallbackKm ? `sunshine taken from the nearest source cell ${square.sunFallbackKm} km away` : null,
 			square.dewFallback ? "dew point from the coarser ERA5 grid" : null,
-			"snowfall: 1 mm water equivalent is roughly 1 cm of fresh snow (the site shows that estimate); ~9 km cells smooth out mountains; in mild climates snowfall is capped to what local temperatures allow",
+			"snowfall: 1 mm water equivalent is roughly 1 cm of fresh snow (the site shows that estimate); snowfall is matched to this 10 km area's own CHELSA temperature and precipitation (ERA5-Land alone smooths out mountains)",
 			square.snowFallbackKm ? `snow taken from the nearest land cell ${square.snowFallbackKm} km away` : null,
 			lat < -60 ? "Antarctica: very few weather stations, values are model estimates" : null
 		].filter(Boolean),
@@ -27431,7 +27431,7 @@ function placeContext(name, square, stations, snowStations = null) {
 			low: rec(lo)
 		},
 		station_snow_records: snowRecord(snowStations, [lon, lat]),
-		sources: "CHELSA V2.1 1981-2010 (temperature, precipitation, wind, humidity, cloud); ERA5-Land dew point, snowfall and snow depth 1981-2010; CRU CL 2.0 sunshine about 1961-1990; NOAA GHCN-Daily station records"
+		sources: "CHELSA V2.1 1981-2010 (temperature, precipitation, wind, humidity, cloud); ERA5-Land dew point, snowfall (matched to each area's CHELSA climate) and snow depth 1981-2010; CRU CL 2.0 sunshine about 1961-1990; NOAA GHCN-Daily station records"
 	};
 }
 var SYSTEM = `You are ClimaClue, the friendly guide on climaclue.com, a globe where people explore the climate of any place on Earth.
