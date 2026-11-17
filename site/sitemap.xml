@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://climaclue.com/</loc></url>
-  <url><loc>https://climaclue.com/about/</loc></url>
-  <url><loc>https://climaclue.com/privacy/</loc></url>
-</urlset>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap><loc>https://climaclue.com/sitemaps/pages.xml</loc></sitemap>
+  <sitemap><loc>https://climaclue.com/sitemaps/countries.xml</loc><lastmod>2026-11-17</lastmod></sitemap>
+  <sitemap><loc>https://climaclue.com/sitemaps/types.xml</loc><lastmod>2026-11-17</lastmod></sitemap>
+  <sitemap><loc>https://climaclue.com/sitemaps/towns-1.xml</loc><lastmod>2026-11-17</lastmod></sitemap>
+  <sitemap><loc>https://climaclue.com/sitemaps/towns-2.xml</loc><lastmod>2026-11-17</lastmod></sitemap>
+</sitemapindex>
