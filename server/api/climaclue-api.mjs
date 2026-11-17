@@ -1,5 +1,6 @@
 import http from "node:http";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, chownSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
 // \0rolldown/runtime.js
 var __defProp = Object.defineProperty;
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod, mod.exports), cb = null), mod.exports);
@@ -7813,7 +7814,7 @@ var EnvironmentWorker = /* @__PURE__ */ (() => {
 		const ctrl = new AbortController();
 		const detachExternal = linkAbort(externalSignal, ctrl);
 		const lease = new Lease(ctrl);
-		const agentToolset = await import("./assets/node-BauKscvX.js");
+		const agentToolset = await import("./assets/node-CX2O0eNJ.js");
 		let leaseTtlMs;
 		let runner;
 		const heartbeatPromise = heartbeatLoop(sessionClient, work, lease, log, this.requestOptions, (ttlMs) => {
@@ -25053,7 +25054,7 @@ function redactSensitive(body) {
 */
 async function checkCredentialsFileSafety(path, onWarn = (m) => console.warn(`anthropic-sdk: ${m}`)) {
 	if (typeof process === "undefined" || process.platform === "win32") return;
-	const { fs } = await import("./assets/node-B2-853UE.js").then((n) => n.i);
+	const { fs } = await import("./assets/node-CUM3oIzH.js").then((n) => n.i);
 	let resolved = path;
 	let st;
 	try {
@@ -25073,7 +25074,7 @@ async function checkCredentialsFileSafety(path, onWarn = (m) => console.warn(`an
 * Creates the parent directory with mode 0700 and the file with mode 0600.
 */
 async function writeCredentialsFileAtomic(targetPath, data) {
-	const { fs, path } = await import("./assets/node-B2-853UE.js").then((n) => n.i);
+	const { fs, path } = await import("./assets/node-CUM3oIzH.js").then((n) => n.i);
 	const dir = path.dirname(targetPath);
 	await fs.promises.mkdir(dir, {
 		recursive: true,
@@ -25287,7 +25288,7 @@ var loadConfigWithSource = async (profile) => {
 	const profileName = profile ?? await getActiveProfileName();
 	if (profileName === null) return null;
 	validateProfileName(profileName);
-	const { fs, path } = await import("./assets/node-B2-853UE.js").then((n) => n.i);
+	const { fs, path } = await import("./assets/node-CUM3oIzH.js").then((n) => n.i);
 	const configPath = path.join(rootConfigPath, "configs", `${profileName}.json`);
 	let configRaw;
 	try {
@@ -25341,12 +25342,12 @@ var getCredentialsPath = async (config, profile) => {
 	const profileName = profile ?? await getActiveProfileName();
 	if (!profileName) return null;
 	validateProfileName(profileName);
-	const { path } = await import("./assets/node-B2-853UE.js").then((n) => n.i);
+	const { path } = await import("./assets/node-CUM3oIzH.js").then((n) => n.i);
 	return path.join(rootConfigPath, "credentials", `${profileName}.json`);
 };
 var getRootConfigPath = async () => {
 	if (!supportsLocalConfigFiles()) return null;
-	const { path } = await import("./assets/node-B2-853UE.js").then((n) => n.i);
+	const { path } = await import("./assets/node-CUM3oIzH.js").then((n) => n.i);
 	const configDir = readEnv("ANTHROPIC_CONFIG_DIR");
 	if (configDir) return configDir;
 	if (getPlatformHeaders()["X-Stainless-OS"] === "Windows") {
@@ -25371,7 +25372,7 @@ var getActiveProfileName = async () => {
 	if (!rootConfigPath) return null;
 	const profileName = readEnv("ANTHROPIC_PROFILE");
 	if (profileName) return profileName;
-	const { fs, path } = await import("./assets/node-B2-853UE.js").then((n) => n.i);
+	const { fs, path } = await import("./assets/node-CUM3oIzH.js").then((n) => n.i);
 	const filePath = path.join(rootConfigPath, "active_config");
 	try {
 		return (await fs.promises.readFile(filePath, "utf-8")).trim() || "default";
@@ -25388,7 +25389,7 @@ var getActiveProfileName = async () => {
 function identityTokenFromFile(path) {
 	if (!path) throw new AnthropicError("Identity token file path is empty");
 	return async () => {
-		const { fs } = await import("./assets/node-B2-853UE.js").then((n) => n.i);
+		const { fs } = await import("./assets/node-CUM3oIzH.js").then((n) => n.i);
 		let content;
 		try {
 			content = await fs.promises.readFile(path, "utf-8");
@@ -25475,7 +25476,7 @@ function oidcFederationProvider(config) {
 */
 function userOAuthProvider(config) {
 	return async (opts) => {
-		const { fs } = await import("./assets/node-B2-853UE.js").then((n) => n.i);
+		const { fs } = await import("./assets/node-CUM3oIzH.js").then((n) => n.i);
 		await checkCredentialsFileSafety(config.credentialsPath, config.onSafetyWarning);
 		let raw;
 		try {
@@ -25655,7 +25656,7 @@ function resolveIdentityTokenProvider(auth) {
 */
 function cachedExchangeProvider(exchange, credentialsPath, onCacheWriteError, onSafetyWarning) {
 	return async (opts) => {
-		const { fs } = await import("./assets/node-B2-853UE.js").then((n) => n.i);
+		const { fs } = await import("./assets/node-CUM3oIzH.js").then((n) => n.i);
 		await checkCredentialsFileSafety(credentialsPath, onSafetyWarning);
 		let existing;
 		try {
@@ -27893,6 +27894,453 @@ async function runTool(env, name, input) {
 		};
 	}
 }
+var MAX = 200;
+/** Keep only well-formed places (same rules in the browser and on the server); at most 200, names at most 60 characters. */
+function sanitizePlaces(raw) {
+	if (!Array.isArray(raw)) return [];
+	const seen = /* @__PURE__ */ new Set();
+	return raw.filter((p) => p && typeof p.id === "string" && p.id.length > 0 && p.id.length <= 40 && typeof p.name === "string" && Array.isArray(p.coordinates) && p.coordinates.length === 2 && p.coordinates.every((v) => typeof v === "number" && Number.isFinite(v)) && Math.abs(p.coordinates[0]) <= 180 && Math.abs(p.coordinates[1]) <= 90).filter((p) => !seen.has(p.id) && !!seen.add(p.id)).slice(0, MAX).map((p) => ({
+		id: p.id,
+		name: cleanName(p.name) || "My place",
+		coordinates: [p.coordinates[0], p.coordinates[1]],
+		savedAt: String(p.savedAt ?? "").slice(0, 40)
+	}));
+}
+var cleanName = (name) => name.replace(/\s+/g, " ").trim().slice(0, 60);
+var COOKIE = "__Host-climaclue_session";
+var GOOGLE_ISSUERS = /* @__PURE__ */ new Set(["accounts.google.com", "https://accounts.google.com"]);
+var GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
+var AuthError = class extends Error {
+	code;
+	constructor(code, message = code) {
+		super(message);
+		this.code = code;
+	}
+};
+var b64 = (s) => Buffer.from(s, "base64url");
+/** Google's signing keys (JWKS), cached for the time Google's Cache-Control allows; refetched (at most once a minute) for an unknown key id. */
+function createJwks(fetcher = fetch, url = GOOGLE_JWKS_URL, clock = () => Date.now()) {
+	let keys = /* @__PURE__ */ new Map(), expires = 0, lastFetch = -Infinity;
+	let pending = null;
+	const refresh = async () => {
+		lastFetch = clock();
+		const r = await fetcher(url);
+		if (!r.ok) throw new AuthError("jwks_unavailable", `Google keys: HTTP ${r.status}`);
+		const body = await r.json();
+		const next = /* @__PURE__ */ new Map();
+		for (const k of body.keys ?? []) {
+			if (!k.kid || k.kty !== "RSA" || k.alg && k.alg !== "RS256" || k.use && k.use !== "sig") continue;
+			try {
+				next.set(k.kid, createPublicKey({
+					key: k,
+					format: "jwk"
+				}));
+			} catch {}
+		}
+		const maxAge = Number(/max-age=(\d+)/.exec(r.headers?.get?.("cache-control") ?? "")?.[1] ?? 3600);
+		keys = next;
+		expires = clock() + Math.min(Math.max(maxAge, 60), 86400) * 1e3;
+	};
+	const load = () => pending ??= refresh().finally(() => {
+		pending = null;
+	});
+	return async (kid) => {
+		if (clock() >= expires) await load();
+		else if (!keys.has(kid) && clock() - lastFetch > 6e4) await load();
+		return keys.get(kid) ?? null;
+	};
+}
+/** Verify a Google ID token and return the account details it vouches for; throws AuthError when it is not valid. */
+async function verifyGoogleIdToken(token, opts) {
+	if (!opts.clientId) throw new AuthError("not_configured");
+	if (typeof token !== "string" || token.length > 4096) throw new AuthError("malformed");
+	const parts = token.split(".");
+	if (parts.length !== 3 || parts.some((p) => !/^[A-Za-z0-9_-]+$/.test(p))) throw new AuthError("malformed");
+	let header, claims;
+	try {
+		header = JSON.parse(b64(parts[0]).toString("utf8"));
+		claims = JSON.parse(b64(parts[1]).toString("utf8"));
+	} catch {
+		throw new AuthError("malformed");
+	}
+	if (!claims || typeof claims !== "object") throw new AuthError("malformed");
+	if (header.alg !== "RS256" || typeof header.kid !== "string") throw new AuthError("bad_algorithm");
+	const key = await opts.keyFor(header.kid);
+	if (!key) throw new AuthError("unknown_key");
+	if (!verify("sha256", Buffer.from(`${parts[0]}.${parts[1]}`), key, b64(parts[2]))) throw new AuthError("bad_signature");
+	const now = opts.now ?? Math.floor(Date.now() / 1e3), skew = 60;
+	if (!GOOGLE_ISSUERS.has(String(claims.iss))) throw new AuthError("bad_issuer");
+	if (!(Array.isArray(claims.aud) ? claims.aud : [claims.aud]).includes(opts.clientId)) throw new AuthError("bad_audience");
+	if (typeof claims.exp !== "number" || claims.exp + skew < now) throw new AuthError("expired");
+	if (typeof claims.iat === "number" && claims.iat - skew > now) throw new AuthError("not_yet_valid");
+	if (claims.email_verified !== true && claims.email_verified !== "true") throw new AuthError("email_unverified");
+	if (typeof claims.sub !== "string" || !claims.sub || claims.sub.length > 255) throw new AuthError("malformed");
+	if (typeof claims.email !== "string" || !claims.email.includes("@") || claims.email.length > 320) throw new AuthError("malformed");
+	const picture = typeof claims.picture === "string" && /^https:\/\/[^\s"'<>]+$/.test(claims.picture) && claims.picture.length <= 1e3 ? claims.picture : "";
+	const name = typeof claims.name === "string" ? claims.name.replace(/\s+/g, " ").trim().slice(0, 100) : "";
+	return {
+		sub: claims.sub,
+		email: claims.email.toLowerCase(),
+		name,
+		picture
+	};
+}
+var hashToken = (token) => createHash("sha256").update(token).digest("hex");
+/** JSON files under `dir`, written atomically; re-read when another process (the admin command) changed them. */
+function createAccountStore(dir, clock = () => Date.now()) {
+	if (!existsSync(dir)) {
+		mkdirSync(dir, {
+			recursive: true,
+			mode: 448
+		});
+		if (process.getuid?.() === 0) {
+			const p = statSync(`${dir}/..`);
+			try {
+				chownSync(dir, p.uid, p.gid);
+			} catch {}
+		}
+	}
+	const names = [
+		"users",
+		"sessions",
+		"places"
+	];
+	const data = {
+		users: {},
+		sessions: {},
+		places: {}
+	};
+	const seen = {};
+	const path = (n) => `${dir}/${n}.json`;
+	const stamp = (n) => {
+		try {
+			const s = statSync(path(n));
+			return `${s.mtimeMs}:${s.size}:${s.ino}`;
+		} catch {
+			return "";
+		}
+	};
+	const fresh = () => {
+		for (const n of names) {
+			const st = stamp(n);
+			if (st === seen[n]) continue;
+			seen[n] = st;
+			try {
+				data[n] = existsSync(path(n)) ? JSON.parse(readFileSync(path(n), "utf8")) : {};
+			} catch {}
+		}
+	};
+	const save = (n) => {
+		const tmp = `${path(n)}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+		writeFileSync(tmp, JSON.stringify(data[n]), { mode: 384 });
+		if (process.getuid?.() === 0) {
+			const d = statSync(dir);
+			try {
+				chownSync(tmp, d.uid, d.gid);
+			} catch {}
+		}
+		renameSync(tmp, path(n));
+		seen[n] = stamp(n);
+	};
+	const pruneSessions = () => {
+		const now = clock();
+		let changed = false;
+		for (const [k, s] of Object.entries(data.sessions)) if (s.expires <= now || !data.users[s.userId]) {
+			delete data.sessions[k];
+			changed = true;
+		}
+		return changed;
+	};
+	fresh();
+	const byEmail = (email) => Object.values(data.users).filter((u) => u.email === email.trim().toLowerCase());
+	return {
+		upsertUser(c) {
+			fresh();
+			const old = data.users[c.sub];
+			const user = {
+				id: c.sub,
+				email: c.email,
+				name: c.name,
+				picture: c.picture,
+				createdAt: old?.createdAt ?? new Date(clock()).toISOString(),
+				member: old?.member === true
+			};
+			if (!old || JSON.stringify(old) !== JSON.stringify(user)) {
+				data.users[c.sub] = user;
+				save("users");
+			}
+			return user;
+		},
+		createSession(userId) {
+			fresh();
+			pruneSessions();
+			const mine = Object.entries(data.sessions).filter(([, s]) => s.userId === userId).sort((a, b) => a[1].created - b[1].created);
+			for (const [k] of mine.slice(0, Math.max(0, mine.length - 19))) delete data.sessions[k];
+			const token = randomBytes(32).toString("base64url"), now = clock(), expires = now + 2592e6;
+			data.sessions[hashToken(token)] = {
+				userId,
+				expires,
+				created: now
+			};
+			save("sessions");
+			return {
+				token,
+				expires
+			};
+		},
+		userForToken(token) {
+			if (!token || token.length > 100) return null;
+			fresh();
+			const key = hashToken(token), s = data.sessions[key];
+			if (!s) return null;
+			if (s.expires <= clock()) {
+				delete data.sessions[key];
+				save("sessions");
+				return null;
+			}
+			return data.users[s.userId] ?? null;
+		},
+		deleteSession(token) {
+			if (!token) return;
+			fresh();
+			const key = hashToken(token);
+			if (data.sessions[key]) {
+				delete data.sessions[key];
+				save("sessions");
+			}
+		},
+		getPlaces(userId) {
+			fresh();
+			return sanitizePlaces(data.places[userId] ?? []);
+		},
+		setPlaces(userId, places) {
+			fresh();
+			if (!data.users[userId]) throw new AuthError("no_user");
+			data.places[userId] = sanitizePlaces(places);
+			save("places");
+			return data.places[userId];
+		},
+		deleteUser(userId) {
+			fresh();
+			if (!data.users[userId]) return false;
+			delete data.users[userId];
+			delete data.places[userId];
+			for (const [k, s] of Object.entries(data.sessions)) if (s.userId === userId) delete data.sessions[k];
+			save("users");
+			save("places");
+			save("sessions");
+			return true;
+		},
+		/** Admin: set the member flag for the account(s) with this email. Returns how many were changed. */
+		setMember(email, member) {
+			fresh();
+			const users = byEmail(email);
+			for (const u of users) u.member = member;
+			if (users.length) save("users");
+			return users.length;
+		},
+		findByEmail(email) {
+			fresh();
+			return byEmail(email);
+		},
+		listUsers() {
+			fresh();
+			return Object.values(data.users);
+		}
+	};
+}
+/** At most `limit` requests per `windowMs` per key (fixed window, in memory only). */
+function rateLimiter(limit, windowMs, clock = () => Date.now()) {
+	const hits = /* @__PURE__ */ new Map();
+	return (key) => {
+		const now = clock();
+		if (hits.size > 5e4) {
+			for (const [k, v] of hits) if (now - v.start >= windowMs) hits.delete(k);
+		}
+		const h = hits.get(key);
+		if (!h || now - h.start >= windowMs) {
+			hits.set(key, {
+				start: now,
+				n: 1
+			});
+			return true;
+		}
+		if (h.n >= limit) return false;
+		h.n++;
+		return true;
+	};
+}
+var clientIp = (req) => String(req.headers["cf-connecting-ip"] ?? req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
+var send = (res, status, body, headers = {}) => {
+	res.writeHead(status, {
+		"content-type": "application/json",
+		"cache-control": "no-store",
+		...headers
+	});
+	res.end(JSON.stringify(body));
+};
+function readCookie(req, name) {
+	for (const part of String(req.headers.cookie ?? "").split(";")) {
+		const i = part.indexOf("=");
+		if (i < 0) continue;
+		if (part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+	}
+}
+var sessionCookie = (token, maxAgeSeconds) => `${COOKIE}=${token}; Path=/; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
+async function readJson(req, limit) {
+	let raw = "";
+	for await (const chunk of req) {
+		raw += chunk;
+		if (raw.length > limit) throw new AuthError("too_large");
+	}
+	try {
+		return JSON.parse(raw);
+	} catch {
+		throw new AuthError("bad_json");
+	}
+}
+/** Cross-site protection for requests that change state: custom header, JSON body, and a same-site Origin when one is sent. */
+function sameSiteRequest(req, allowedOrigins = []) {
+	if (req.headers["x-climaclue"] !== "1") return false;
+	const origin = req.headers.origin;
+	if (origin) {
+		let host = "";
+		try {
+			host = new URL(origin).host;
+		} catch {
+			return false;
+		}
+		if (host !== req.headers.host && !allowedOrigins.includes(origin)) return false;
+	}
+	return true;
+}
+var publicUser = (u) => ({
+	email: u.email,
+	name: u.name,
+	picture: u.picture,
+	member: u.member,
+	createdAt: u.createdAt
+});
+function createAccounts(opts) {
+	const clock = opts.clock ?? (() => Date.now());
+	const store = createAccountStore(`${opts.stateDir}/accounts`, clock);
+	const keyFor = opts.keyFor ?? createJwks();
+	const authLimit = rateLimiter(10, 6e5, clock), apiLimit = rateLimiter(300, 6e5, clock);
+	const enabled = !!opts.clientId;
+	const userFor = (req) => enabled ? store.userForToken(readCookie(req, COOKIE)) : null;
+	/** Handle /api/config, /api/auth/*, /api/me and /api/places. Returns false for other paths. */
+	async function handle(req, res, path) {
+		const method = req.method ?? "GET";
+		if (path === "/api/config" && method === "GET") {
+			const u = userFor(req);
+			send(res, 200, {
+				googleClientId: enabled ? opts.clientId : null,
+				user: u ? publicUser(u) : null
+			});
+			return true;
+		}
+		if (path !== "/api/me" && path !== "/api/places" && !path.startsWith("/api/auth/")) return false;
+		if (!enabled) {
+			send(res, 404, { error: "Accounts are not switched on" });
+			return true;
+		}
+		const ip = clientIp(req);
+		if (method !== "GET" && method !== "HEAD" && !sameSiteRequest(req, opts.allowedOrigins)) {
+			send(res, 403, { error: "Forbidden" });
+			return true;
+		}
+		try {
+			if (path === "/api/auth/google" && method === "POST") {
+				if (!authLimit(ip)) {
+					send(res, 429, { error: "Too many sign-in attempts. Try again in a few minutes." });
+					return true;
+				}
+				if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) {
+					send(res, 415, { error: "JSON expected" });
+					return true;
+				}
+				const body = await readJson(req, 8e3);
+				let claims;
+				try {
+					claims = await verifyGoogleIdToken(String(body?.credential ?? ""), {
+						clientId: opts.clientId,
+						keyFor
+					});
+				} catch (e) {
+					if (e instanceof AuthError && e.code === "jwks_unavailable") {
+						send(res, 503, { error: "Google sign-in is unavailable right now. Try again shortly." });
+						return true;
+					}
+					send(res, 401, { error: "Google sign-in could not be verified." });
+					return true;
+				}
+				const user = store.upsertUser(claims), old = readCookie(req, COOKIE);
+				if (old) store.deleteSession(old);
+				const { token } = store.createSession(user.id);
+				send(res, 200, { user: publicUser(user) }, { "set-cookie": sessionCookie(token, 2592e3) });
+				return true;
+			}
+			if (!apiLimit(ip)) {
+				send(res, 429, { error: "Too many requests. Try again in a few minutes." });
+				return true;
+			}
+			if (path === "/api/auth/logout" && method === "POST") {
+				store.deleteSession(readCookie(req, COOKIE));
+				send(res, 200, { ok: true }, { "set-cookie": sessionCookie("", 0) });
+				return true;
+			}
+			const user = userFor(req);
+			if (!user) {
+				send(res, 401, { error: "Not signed in" }, readCookie(req, "__Host-climaclue_session") ? { "set-cookie": sessionCookie("", 0) } : {});
+				return true;
+			}
+			if (path === "/api/me" && method === "GET") {
+				send(res, 200, { user: publicUser(user) });
+				return true;
+			}
+			if (path === "/api/me" && method === "DELETE") {
+				store.deleteUser(user.id);
+				send(res, 200, { ok: true }, { "set-cookie": sessionCookie("", 0) });
+				return true;
+			}
+			if (path === "/api/places" && method === "GET") {
+				send(res, 200, { places: store.getPlaces(user.id) });
+				return true;
+			}
+			if (path === "/api/places" && method === "PUT") {
+				if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) {
+					send(res, 415, { error: "JSON expected" });
+					return true;
+				}
+				const body = await readJson(req, 64e3);
+				if (!Array.isArray(body?.places)) {
+					send(res, 400, { error: "places must be a list" });
+					return true;
+				}
+				send(res, 200, { places: store.setPlaces(user.id, body.places) });
+				return true;
+			}
+			send(res, 405, { error: "Method not allowed" });
+			return true;
+		} catch (e) {
+			if (e instanceof AuthError && e.code === "too_large") {
+				send(res, 413, { error: "Too large" });
+				return true;
+			}
+			if (e instanceof AuthError && e.code === "bad_json") {
+				send(res, 400, { error: "Bad request" });
+				return true;
+			}
+			throw e;
+		}
+	}
+	return {
+		handle,
+		userFor,
+		store,
+		enabled
+	};
+}
 // api/server.ts
 /**
 * ClimaClue chat service (runs on the Hetzner server behind Caddy at /api/*, port 127.0.0.1:8090).
@@ -27902,7 +28350,11 @@ async function runTool(env, name, input) {
 *  - a per-visitor daily limit on new answers (CLIMACLUE_DAILY_PER_VISITOR, default 15);
 *  - stored answers for suggested questions (served free, never counted against limits).
 * Visitor addresses are only kept in memory to count today's questions; questions are not logged.
+* Also serves accounts ("Sign in with Google", saved places, member flag; see accounts.ts), switched on by
+* CLIMACLUE_GOOGLE_CLIENT_ID. Without it the site behaves as before: no sign-in, everything kept in the browser.
 * Usage: node climaclue-api.mjs            (serve)
+*        node climaclue-api.mjs --set-member <email> true|false   (admin: mark an account as a member, or not)
+*        node climaclue-api.mjs --list-users | --delete-user <email>
 *        node climaclue-api.mjs --prewarm N [K] (store answers to the top K suggested questions per tab, default 3,
 *        for the N biggest cities, with the Batch API at half price)
 */
@@ -27924,6 +28376,11 @@ var TABS = [
 	"snow"
 ];
 mkdirSync(STATE, { recursive: true });
+var accounts = createAccounts({
+	clientId: (process.env.CLIMACLUE_GOOGLE_CLIENT_ID ?? "").trim(),
+	stateDir: STATE,
+	allowedOrigins: (process.env.CLIMACLUE_ORIGINS ?? "https://climaclue.com,https://www.climaclue.com").split(",").map((s) => s.trim()).filter(Boolean)
+});
 var fileFetcher = (async (url) => {
 	const path = `${DATA}/squares/${String(url).split("?")[0].replace(/^.*\/squares\//, "")}`;
 	if (!existsSync(path)) return {
@@ -28080,8 +28537,10 @@ async function handle(req, res) {
 	if (path === "/api/health") return json(res, 200, {
 		ok: true,
 		chat: !!client && !overCap(),
-		stored: stored.size
+		stored: stored.size,
+		accounts: accounts.enabled
 	});
+	if (await accounts.handle(req, res, path)) return;
 	if (path !== "/api/ask" || req.method !== "POST") return json(res, 404, { error: "Not found" });
 	let raw = "";
 	for await (const chunk of req) {
@@ -28110,7 +28569,7 @@ async function handle(req, res) {
 		square: await load(p)
 	})))).filter((p) => !!p.square);
 	if (!ok.length) return json(res, 422, { error: "No climate data for that place" });
-	if (MEMBERSHIP) {
+	if (MEMBERSHIP && !accounts.userFor(req)?.member) {
 		const town = places[0].name.split(",")[0], offered = [...suggestQuestions(ok[0].square, tab, null), ...suggestQuestions(ok[0].square, tab, town)];
 		if (!body.suggestionId || !offered.some((s) => s.id === body.suggestionId && s.text === question)) return json(res, 403, { error: "Asking your own questions is for members. The suggested questions are free." });
 	}
@@ -28121,7 +28580,7 @@ async function handle(req, res) {
 	});
 	if (!client) return json(res, 503, { error: "ClimaClue’s chat isn’t switched on yet." });
 	if (overCap()) return json(res, 503, { error: "ClimaClue has answered all the questions it can this month. Suggested questions for big cities still work." });
-	if (!allow(String(req.headers["cf-connecting-ip"] ?? req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim())) return json(res, 429, { error: `You’ve asked ${PER_VISITOR} questions today. Come back tomorrow for more.` });
+	if (!allow(clientIp(req))) return json(res, 429, { error: `You’ve asked ${PER_VISITOR} questions today. Come back tomorrow for more.` });
 	try {
 		const { text, proposal } = await answer(ok, question, tab, history);
 		if (key && !proposal) store(key, text);
@@ -28198,11 +28657,48 @@ async function prewarm(n, perTab) {
 		console.log(`stored ${saved} answers, about $${cost.toFixed(2)}`);
 	}
 }
-if (process.argv[2] === "--prewarm") prewarm(Number(process.argv[3] ?? 1e3), Number(process.argv[4] ?? 3)).then(() => process.exit(0), (e) => {
+/** Admin commands for accounts (run on the server; changes reach the running service without a restart). */
+function admin(args) {
+	const [cmd, email, value] = args;
+	if (cmd === "--list-users") {
+		for (const u of accounts.store.listUsers()) console.log(`${u.email}\t${u.member ? "member" : "free"}\t${u.name}\tsince ${u.createdAt.slice(0, 10)}`);
+		return 0;
+	}
+	if (cmd === "--set-member") {
+		if (!email || value !== "true" && value !== "false") {
+			console.error("Usage: --set-member <email> true|false");
+			return 2;
+		}
+		if (!accounts.store.setMember(email, value === "true")) {
+			console.error(`No account with the email ${email}. They need to sign in once first.`);
+			return 1;
+		}
+		console.log(`${email}: member = ${value}`);
+		return 0;
+	}
+	if (cmd === "--delete-user") {
+		if (!email) {
+			console.error("Usage: --delete-user <email>");
+			return 2;
+		}
+		const users = accounts.store.findByEmail(email);
+		for (const u of users) accounts.store.deleteUser(u.id);
+		console.log(users.length ? `Deleted ${email} (account, saved places and sessions).` : `No account with the email ${email}.`);
+		return users.length ? 0 : 1;
+	}
+	return -1;
+}
+var adminExit = [
+	"--list-users",
+	"--set-member",
+	"--delete-user"
+].includes(process.argv[2]) ? admin(process.argv.slice(2)) : -1;
+if (adminExit >= 0) process.exit(adminExit);
+else if (process.argv[2] === "--prewarm") prewarm(Number(process.argv[3] ?? 1e3), Number(process.argv[4] ?? 3)).then(() => process.exit(0), (e) => {
 	console.error(e.message);
 	process.exit(1);
 });
 else http.createServer((req, res) => {
 	handle(req, res).catch(() => json(res, 500, { error: "Something went wrong" }));
-}).listen(Number(process.env.PORT ?? 8090), "127.0.0.1", () => console.log("ClimaClue chat service on 127.0.0.1:" + (process.env.PORT ?? 8090), client ? "(key loaded)" : "(no key: chat off)"));
+}).listen(Number(process.env.PORT ?? 8090), "127.0.0.1", () => console.log("ClimaClue chat service on 127.0.0.1:" + (process.env.PORT ?? 8090), client ? "(key loaded)" : "(no key: chat off)", accounts.enabled ? "(accounts on)" : "(no Google client ID: accounts off)"));
 export { ToolError as a, decodeUTF8 as c, __classPrivateFieldGet as d, __classPrivateFieldSet as f, checkMemorySyncInterval as i, encodeUTF8 as l, DEFAULT_MEMORY_SYNC_INTERVAL_MS as n, isStatus as o, __exportAll as p, MIN_MEMORY_SYNC_INTERVAL_MS as r, loggerFor as s, promiseWithResolvers as t, AnthropicError as u };
