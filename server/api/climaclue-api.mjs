@@ -29370,6 +29370,7 @@ async function handle(req, res) {
 		});
 	} catch (e) {
 		if (counted) billing.returnQuestion(user.id);
+		console.error(`ask failed: ${e?.message ?? e}`);
 		const status = e instanceof Anthropic.RateLimitError ? 429 : 502;
 		return json(res, status, { error: status === 429 ? "ClimaClue is busy right now. Try again in a minute." : "ClimaClue couldn’t answer just now. Try again shortly." });
 	}
