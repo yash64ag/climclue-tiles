@@ -27385,6 +27385,7 @@ function nearestSnowRecord(data, at, maxKm = 75) {
 // api/context.ts
 /** The data ClimaClue's answers are grounded in: one place's real values from the site's own files. */
 var r1 = (v) => v === null ? null : Math.round(v * 10) / 10;
+var total = (v) => v.every((x) => x !== null) ? Math.round(v.reduce((a, b) => a + b, 0)) : null;
 function placeContext(name, square, stations, snowStations = null) {
 	const L = square.layers, lat = (square.bounds[1] + square.bounds[3]) / 2, lon = (square.bounds[0] + square.bounds[2]) / 2;
 	const type = koppen(L.tas.mean, L.pr.mean, lat);
@@ -27405,6 +27406,11 @@ function placeContext(name, square, stations, snowStations = null) {
 		borderline: type?.borderline ?? [],
 		km_to_open_sea: square.seaKm,
 		annual_mean_temp_C: r1(squareAnnualMean(square)),
+		yearly_totals: {
+			precip_mm: total(L.pr.mean),
+			sunshine_hours: total(L.sun.mean),
+			snowfall_mm_water_equivalent: total(L.sf.mean)
+		},
 		monthly_Jan_to_Dec: {
 			mean_temp_C: L.tas.mean.map(r1),
 			avg_night_low_C: L.tasmin.mean.map(r1),
@@ -27437,7 +27443,7 @@ function placeContext(name, square, stations, snowStations = null) {
 var SYSTEM = `You are ClimaClue, the friendly guide on climaclue.com, a globe where people explore the climate of any place on Earth.
 Answer the visitor's question in plain English for a curious non-expert, in at most 120 words. Plain text only: no markdown, headings, bullet points or dashes at the start of lines; write in sentences. When listing places, name at most four, in one or two sentences.
 DATA holds the place the visitor is looking at. You can see the whole globe through your tools: place_climate (any town by name), point_climate (any latitude/longitude), similar_places (where else has this climate), extreme_places (the wettest, sunniest, coldest… towns of 100,000+ people), map_extremes (every land area on the globe, not just towns: "the whole map", "anywhere on Earth", or a region given as a latitude/longitude box). "This map" or "the whole map" means the whole globe. When your answer centres on one other place (one you found or the visitor asked about), call propose_explore so they can open it in Explore; when it compares two places, use propose_comparison instead. Whenever a question involves another place, a comparison, "where else" or a ranking, look it up with a tool before answering. Never say you only have data for this spot, and never tell the visitor to look something up themselves.
-Every number you state must come from DATA or a tool result (say which month or measure). Never invent figures. If you compare or calculate, show the result briefly.
+Every number you state must come from DATA or a tool result (say which month or measure). For yearly amounts use DATA's yearly_totals rather than adding months yourself. Never invent figures. If you compare or calculate, show the result briefly.
 When the visitor asks to compare two places (or this place with another): look up the other place with place_climate and call propose_comparison (so they can open both side by side), then, after all tool calls, write the comparison with real numbers from both places; the offer never replaces the answer. Mention the offer in one short closing sentence.
 Explain causes with real geography (ocean currents, prevailing winds, mountains, latitude, distance from the sea, elevation), specific to each place rather than generic to its climate type. If a cause is not shown by the data, present it as the usual explanation ("This is mainly because…") without overstating certainty.
 If the question is not about climate, weather, geography or this site, politely steer back to the place. If even the tools cannot answer it, say so briefly.
