@@ -28603,6 +28603,8 @@ function createAccounts(opts) {
 var MODEL = "claude-sonnet-5-5";
 var PRICE_IN = 2;
 var PRICE_OUT = 10;
+var PRICE_CACHE_READ = .1;
+var PRICE_CACHE_WRITE = 2.5;
 var DATA = process.env.CLIMACLUE_DATA ?? "/srv/climaclue/public";
 var STATE = process.env.STATE_DIRECTORY ?? "/var/lib/climaclue-api";
 var CAP = Number(process.env.CLIMACLUE_MONTHLY_CAP_USD ?? 30);
@@ -28746,14 +28748,19 @@ async function answer(places, question, tab, history) {
 		const r = await client.beta.messages.create({
 			model: MODEL,
 			max_tokens: 4e3,
-			system: tab === "trip" ? `${SYSTEM}\n${SAVED_PLACES_SYSTEM}` : SYSTEM,
 			output_config: { effort: "medium" },
 			messages,
 			tools: TOOLS,
+			system: [{
+				type: "text",
+				text: tab === "trip" ? `${SYSTEM}\n${SAVED_PLACES_SYSTEM}` : SYSTEM,
+				cache_control: { type: "ephemeral" }
+			}],
+			cache_control: { type: "ephemeral" },
 			betas: ["server-side-fallback-2026-07-01"],
 			fallbacks: "default"
 		});
-		addSpend((r.usage.input_tokens * PRICE_IN + r.usage.output_tokens * PRICE_OUT) / 1e6);
+		addSpend((r.usage.input_tokens * PRICE_IN + r.usage.output_tokens * PRICE_OUT + (r.usage.cache_read_input_tokens ?? 0) * PRICE_CACHE_READ + (r.usage.cache_creation_input_tokens ?? 0) * PRICE_CACHE_WRITE) / 1e6);
 		if (r.stop_reason === "refusal") return {
 			text: "Sorry, I can’t help with that one. Ask me about this place’s climate instead.",
 			proposal: null
