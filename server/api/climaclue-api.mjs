@@ -28566,7 +28566,7 @@ function createAccounts(opts) {
 			send$1(res, 200, {
 				googleClientId: enabled ? opts.clientId : null,
 				user: u ? publicUser(u, clock()) : null,
-				...opts.config?.()
+				...opts.config?.(u ?? null)
 			});
 			return true;
 		}
@@ -28780,7 +28780,9 @@ var stripeEnvFrom = (env) => ({
 	webhookSecret: env.STRIPE_WEBHOOK_SECRET?.trim(),
 	priceMonthly: env.STRIPE_PRICE_MONTHLY?.trim(),
 	priceYearly: env.STRIPE_PRICE_YEARLY?.trim(),
-	trialDays: Math.max(0, Math.floor(Number(env.STRIPE_TRIAL_DAYS ?? 0)) || 0)
+	trialDays: Math.max(0, Math.floor(Number(env.STRIPE_TRIAL_DAYS ?? 0)) || 0),
+	managedPayments: (env.STRIPE_MANAGED_PAYMENTS ?? "on").trim() !== "off",
+	testers: (env.CLIMACLUE_BILLING_TESTERS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean)
 });
 var idOf = (v) => typeof v === "string" ? v : v && typeof v === "object" && typeof v.id === "string" ? v.id : void 0;
 var send = (res, status, body) => {
@@ -28812,6 +28814,9 @@ function createBilling(opts) {
 	const site = (opts.site ?? "https://climaclue.com").replace(/\/$/, "");
 	const configured = !!(env.secretKey && env.webhookSecret && env.priceMonthly && env.priceYearly);
 	const open = configured && opts.membership;
+	const testers = new Set(env.testers ?? []);
+	const isTester = (u) => !!u && configured && testers.has(u.email.toLowerCase());
+	const openFor = (u) => open || isTester(u);
 	const checkoutLimit = rateLimiter(20, 6e5, clock);
 	const priceFor = (plan) => plan === "yearly" ? env.priceYearly : env.priceMonthly;
 	const planFor = (price) => price === env.priceYearly ? "yearly" : price === env.priceMonthly ? "monthly" : void 0;
@@ -28925,7 +28930,7 @@ function createBilling(opts) {
 			send(res, status, body);
 			return true;
 		}
-		if (!(path === "/api/billing/portal" ? configured : open)) {
+		if (!configured) {
 			send(res, 503, { error: NOT_OPEN });
 			return true;
 		}
@@ -28934,6 +28939,10 @@ function createBilling(opts) {
 			return true;
 		}
 		const user = accounts.userFor(req);
+		if (path !== "/api/billing/portal" && !openFor(user)) {
+			send(res, 503, { error: NOT_OPEN });
+			return true;
+		}
 		if (!user) {
 			send(res, 401, { error: "Sign in first: the Sign in button is at the top right of the globe." });
 			return true;
@@ -29009,6 +29018,7 @@ function createBilling(opts) {
 		if (user.stripeCustomerId) params.customer = user.stripeCustomerId;
 		else params.customer_email = user.email;
 		if (env.trialDays) params["subscription_data[trial_period_days]"] = String(env.trialDays);
+		if (env.managedPayments) params["managed_payments[enabled]"] = "true";
 		try {
 			const s = await api("checkout/sessions", params);
 			if (typeof s.url !== "string") throw new Error("no url");
@@ -29024,8 +29034,9 @@ function createBilling(opts) {
 		open,
 		handle,
 		applyEvent,
+		isTester,
 		/** Fields for GET /api/config. */
-		config: () => ({ billingOpen: open }),
+		config: (u = null) => ({ billingOpen: openFor(u) }),
 		/** Fields for GET /api/me: the week's questions, for members. */
 		me: (u) => ({ allowance: isMember(u, clock()) ? allowanceFor(u) : null }),
 		allowanceFor,
@@ -29088,7 +29099,7 @@ var accounts = createAccounts({
 	clientId: (process.env.CLIMACLUE_GOOGLE_CLIENT_ID ?? "").trim(),
 	stateDir: STATE,
 	allowedOrigins: (process.env.CLIMACLUE_ORIGINS ?? "https://climaclue.com,https://www.climaclue.com").split(",").map((s) => s.trim()).filter(Boolean),
-	config: () => billing?.config() ?? { billingOpen: false },
+	config: (u) => billing?.config(u) ?? { billingOpen: false },
 	me: (u) => billing?.me(u) ?? {}
 });
 billing = createBilling({
@@ -29325,7 +29336,8 @@ async function handle(req, res) {
 	const town = places[0].name.split(",")[0], other = places[1]?.name.split(",")[0] ?? null;
 	const offered = tab === "trip" ? Array.from({ length: 12 }, (_, m) => [town, null].flatMap((t) => tripQuestions(ok[0].square, t, m, ok.length > 1 ? other : null))).flat() : [...suggestQuestions(ok[0].square, tab, null), ...suggestQuestions(ok[0].square, tab, town)];
 	const suggested = !!body.suggestionId && offered.some((s) => s.id === body.suggestionId && s.text === question);
-	if (MEMBERSHIP && !member) {
+	const memberMode = MEMBERSHIP || !!billing?.isTester(user);
+	if (memberMode && !member) {
 		if (tab === "trip") return json(res, 403, { error: "Planning trips with ClimaClue is for members." });
 		if (!suggested) return json(res, 403, { error: "Asking your own questions is for members. The suggested questions are free." });
 	}
@@ -29336,7 +29348,7 @@ async function handle(req, res) {
 	});
 	if (!client) return json(res, 503, { error: "ClimaClue’s chat isn’t switched on yet." });
 	if (overCap()) return json(res, 503, { error: "ClimaClue has answered all the questions it can this month. Suggested questions for big cities still work." });
-	const counted = countsAgainstAllowance(MEMBERSHIP, member, suggested) && !!user;
+	const counted = countsAgainstAllowance(memberMode, member, suggested) && !!user;
 	if (counted) {
 		const t = billing.takeQuestion(user.id);
 		if (!t.ok) return json(res, 429, {
@@ -29353,7 +29365,7 @@ async function handle(req, res) {
 			stored: false,
 			...proposal ? { compare: proposal } : {},
 			...explore ? { explore } : {},
-			...MEMBERSHIP && member && user ? { allowance: billing.allowanceFor(user) } : {}
+			...memberMode && member && user ? { allowance: billing.allowanceFor(user) } : {}
 		});
 	} catch (e) {
 		if (counted) billing.returnQuestion(user.id);
