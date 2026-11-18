@@ -1,6 +1,6 @@
 import http from "node:http";
 import { appendFileSync, chownSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
+import { createHash, createHmac, createPublicKey, randomBytes, timingSafeEqual, verify } from "node:crypto";
 // \0rolldown/runtime.js
 var __defProp = Object.defineProperty;
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod, mod.exports), cb = null), mod.exports);
@@ -28149,6 +28149,29 @@ function sanitizePlaces(raw) {
 	}));
 }
 var cleanName = (name) => name.replace(/\s+/g, " ").trim().slice(0, 60);
+// api/accounts.ts
+/**
+* ClimaClue accounts: "Sign in with Google", sessions, saved places and a per-account member flag.
+* `member` is the manual flag set with the admin command (server.ts --set-member). A paid membership (Stripe, see
+* billing.ts) is kept in the optional billing fields; isMember() combines the two.
+*
+* - POST /api/auth/google  {credential}: verifies a Google ID token (RS256 signature against Google's published keys,
+*   issuer, audience = CLIMACLUE_GOOGLE_CLIENT_ID, expiry, verified email), creates or updates the user and sets an
+*   httpOnly, Secure, SameSite=Lax session cookie holding a random token (only its SHA-256 is stored; 30 days).
+* - GET /api/me, DELETE /api/me (deletes the account, its places and sessions), POST /api/auth/logout.
+* - GET/PUT /api/places: the signed-in user's saved places (same shape and checks as src/saved-places.ts).
+* - GET /api/config: {googleClientId, user} so the site shows "Sign in" only when accounts are configured.
+* State changes need the header `X-ClimaClue: 1` (a cross-site form or simple request cannot send it) and, when the
+* browser sends an Origin, an Origin matching the site; together with SameSite=Lax this blocks cross-site requests.
+* Users, sessions and places are JSON files under STATE_DIRECTORY/accounts, written atomically (temp file + rename).
+*/
+/** A member: marked by hand, or a Stripe subscription that is active, trialing, or past due within the paid period. */
+function isMember(u, now = Date.now()) {
+	if (!u) return false;
+	if (u.member === true) return true;
+	if (u.status === "active" || u.status === "trialing") return true;
+	return u.status === "past_due" && typeof u.periodEnd === "number" && u.periodEnd * 1e3 > now;
+}
 var COOKIE = "__Host-climaclue_session";
 var GOOGLE_ISSUERS = /* @__PURE__ */ new Set(["accounts.google.com", "https://accounts.google.com"]);
 var GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
@@ -28245,12 +28268,16 @@ function createAccountStore(dir, clock = () => Date.now()) {
 	const names = [
 		"users",
 		"sessions",
-		"places"
+		"places",
+		"allowance",
+		"events"
 	];
 	const data = {
 		users: {},
 		sessions: {},
-		places: {}
+		places: {},
+		allowance: {},
+		events: {}
 	};
 	const seen = {};
 	const path = (n) => `${dir}/${n}.json`;
@@ -28300,6 +28327,7 @@ function createAccountStore(dir, clock = () => Date.now()) {
 			fresh();
 			const old = data.users[c.sub];
 			const user = {
+				...old,
 				id: c.sub,
 				email: c.email,
 				name: c.name,
@@ -28367,10 +28395,12 @@ function createAccountStore(dir, clock = () => Date.now()) {
 			if (!data.users[userId]) return false;
 			delete data.users[userId];
 			delete data.places[userId];
+			delete data.allowance[userId];
 			for (const [k, s] of Object.entries(data.sessions)) if (s.userId === userId) delete data.sessions[k];
 			save("users");
 			save("places");
 			save("sessions");
+			save("allowance");
 			return true;
 		},
 		/** Admin: set the member flag for the account(s) with this email. Returns how many were changed. */
@@ -28384,6 +28414,55 @@ function createAccountStore(dir, clock = () => Date.now()) {
 		findByEmail(email) {
 			fresh();
 			return byEmail(email);
+		},
+		getUser(id) {
+			fresh();
+			return data.users[id] ?? null;
+		},
+		findByCustomer(customerId) {
+			fresh();
+			return Object.values(data.users).find((u) => u.stripeCustomerId === customerId) ?? null;
+		},
+		/** Billing: merge fields into a stored user (undefined values remove a field). */
+		updateUser(id, patch) {
+			fresh();
+			const u = data.users[id];
+			if (!u) return null;
+			const next = {
+				...u,
+				...patch,
+				id: u.id
+			};
+			for (const k of Object.keys(next)) if (next[k] === void 0) delete next[k];
+			data.users[id] = next;
+			save("users");
+			return data.users[id];
+		},
+		getAllowance(id) {
+			fresh();
+			return data.allowance[id] ?? null;
+		},
+		setAllowance(id, a) {
+			fresh();
+			data.allowance[id] = a;
+			save("allowance");
+		},
+		/** Stripe webhook idempotency: true the first time an event id is seen (the newest 5,000 ids are kept). */
+		markEvent(id) {
+			fresh();
+			if (data.events[id]) return false;
+			data.events[id] = clock();
+			const ids = Object.keys(data.events);
+			if (ids.length > 5e3) for (const k of ids.sort((a, b) => data.events[a] - data.events[b]).slice(0, ids.length - 5e3)) delete data.events[k];
+			save("events");
+			return true;
+		},
+		forgetEvent(id) {
+			fresh();
+			if (data.events[id]) {
+				delete data.events[id];
+				save("events");
+			}
 		},
 		listUsers() {
 			fresh();
@@ -28413,7 +28492,7 @@ function rateLimiter(limit, windowMs, clock = () => Date.now()) {
 	};
 }
 var clientIp = (req) => String(req.headers["cf-connecting-ip"] ?? req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
-var send = (res, status, body, headers = {}) => {
+var send$1 = (res, status, body, headers = {}) => {
 	res.writeHead(status, {
 		"content-type": "application/json",
 		"cache-control": "no-store",
@@ -28456,12 +28535,15 @@ function sameSiteRequest(req, allowedOrigins = []) {
 	}
 	return true;
 }
-var publicUser = (u) => ({
+var publicUser = (u, now = Date.now()) => ({
 	email: u.email,
 	name: u.name,
 	picture: u.picture,
-	member: u.member,
-	createdAt: u.createdAt
+	member: isMember(u, now),
+	createdAt: u.createdAt,
+	...u.plan ? { plan: u.plan } : {},
+	...u.periodEnd ? { periodEnd: (/* @__PURE__ */ new Date(u.periodEnd * 1e3)).toISOString() } : {},
+	...u.status ? { cancelAtPeriodEnd: u.cancelAtPeriodEnd === true } : {}
 });
 function createAccounts(opts) {
 	const clock = opts.clock ?? (() => Date.now());
@@ -28475,30 +28557,31 @@ function createAccounts(opts) {
 		const method = req.method ?? "GET";
 		if (path === "/api/config" && method === "GET") {
 			const u = userFor(req);
-			send(res, 200, {
+			send$1(res, 200, {
 				googleClientId: enabled ? opts.clientId : null,
-				user: u ? publicUser(u) : null
+				user: u ? publicUser(u, clock()) : null,
+				...opts.config?.()
 			});
 			return true;
 		}
 		if (path !== "/api/me" && path !== "/api/places" && !path.startsWith("/api/auth/")) return false;
 		if (!enabled) {
-			send(res, 404, { error: "Accounts are not switched on" });
+			send$1(res, 404, { error: "Accounts are not switched on" });
 			return true;
 		}
 		const ip = clientIp(req);
 		if (method !== "GET" && method !== "HEAD" && !sameSiteRequest(req, opts.allowedOrigins)) {
-			send(res, 403, { error: "Forbidden" });
+			send$1(res, 403, { error: "Forbidden" });
 			return true;
 		}
 		try {
 			if (path === "/api/auth/google" && method === "POST") {
 				if (!authLimit(ip)) {
-					send(res, 429, { error: "Too many sign-in attempts. Try again in a few minutes." });
+					send$1(res, 429, { error: "Too many sign-in attempts. Try again in a few minutes." });
 					return true;
 				}
 				if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) {
-					send(res, 415, { error: "JSON expected" });
+					send$1(res, 415, { error: "JSON expected" });
 					return true;
 				}
 				const body = await readJson(req, 8e3);
@@ -28510,67 +28593,70 @@ function createAccounts(opts) {
 					});
 				} catch (e) {
 					if (e instanceof AuthError && e.code === "jwks_unavailable") {
-						send(res, 503, { error: "Google sign-in is unavailable right now. Try again shortly." });
+						send$1(res, 503, { error: "Google sign-in is unavailable right now. Try again shortly." });
 						return true;
 					}
-					send(res, 401, { error: "Google sign-in could not be verified." });
+					send$1(res, 401, { error: "Google sign-in could not be verified." });
 					return true;
 				}
 				const user = store.upsertUser(claims), old = readCookie(req, COOKIE);
 				if (old) store.deleteSession(old);
 				const { token } = store.createSession(user.id);
-				send(res, 200, { user: publicUser(user) }, { "set-cookie": sessionCookie(token, 2592e3) });
+				send$1(res, 200, { user: publicUser(user, clock()) }, { "set-cookie": sessionCookie(token, 2592e3) });
 				return true;
 			}
 			if (!apiLimit(ip)) {
-				send(res, 429, { error: "Too many requests. Try again in a few minutes." });
+				send$1(res, 429, { error: "Too many requests. Try again in a few minutes." });
 				return true;
 			}
 			if (path === "/api/auth/logout" && method === "POST") {
 				store.deleteSession(readCookie(req, COOKIE));
-				send(res, 200, { ok: true }, { "set-cookie": sessionCookie("", 0) });
+				send$1(res, 200, { ok: true }, { "set-cookie": sessionCookie("", 0) });
 				return true;
 			}
 			const user = userFor(req);
 			if (!user) {
-				send(res, 401, { error: "Not signed in" }, readCookie(req, "__Host-climaclue_session") ? { "set-cookie": sessionCookie("", 0) } : {});
+				send$1(res, 401, { error: "Not signed in" }, readCookie(req, "__Host-climaclue_session") ? { "set-cookie": sessionCookie("", 0) } : {});
 				return true;
 			}
 			if (path === "/api/me" && method === "GET") {
-				send(res, 200, { user: publicUser(user) });
+				send$1(res, 200, {
+					user: publicUser(user, clock()),
+					...opts.me?.(user)
+				});
 				return true;
 			}
 			if (path === "/api/me" && method === "DELETE") {
 				store.deleteUser(user.id);
-				send(res, 200, { ok: true }, { "set-cookie": sessionCookie("", 0) });
+				send$1(res, 200, { ok: true }, { "set-cookie": sessionCookie("", 0) });
 				return true;
 			}
 			if (path === "/api/places" && method === "GET") {
-				send(res, 200, { places: store.getPlaces(user.id) });
+				send$1(res, 200, { places: store.getPlaces(user.id) });
 				return true;
 			}
 			if (path === "/api/places" && method === "PUT") {
 				if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) {
-					send(res, 415, { error: "JSON expected" });
+					send$1(res, 415, { error: "JSON expected" });
 					return true;
 				}
 				const body = await readJson(req, 64e3);
 				if (!Array.isArray(body?.places)) {
-					send(res, 400, { error: "places must be a list" });
+					send$1(res, 400, { error: "places must be a list" });
 					return true;
 				}
-				send(res, 200, { places: store.setPlaces(user.id, body.places) });
+				send$1(res, 200, { places: store.setPlaces(user.id, body.places) });
 				return true;
 			}
-			send(res, 405, { error: "Method not allowed" });
+			send$1(res, 405, { error: "Method not allowed" });
 			return true;
 		} catch (e) {
 			if (e instanceof AuthError && e.code === "too_large") {
-				send(res, 413, { error: "Too large" });
+				send$1(res, 413, { error: "Too large" });
 				return true;
 			}
 			if (e instanceof AuthError && e.code === "bad_json") {
-				send(res, 400, { error: "Bad request" });
+				send$1(res, 400, { error: "Bad request" });
 				return true;
 			}
 			throw e;
@@ -28580,7 +28666,375 @@ function createAccounts(opts) {
 		handle,
 		userFor,
 		store,
-		enabled
+		enabled,
+		allowedOrigins: opts.allowedOrigins ?? []
+	};
+}
+var NOT_OPEN = "Membership isn’t open yet.";
+var OUT_OF_QUESTIONS = "You’ve used this week’s 15 questions. Use your monthly refill, or they come back on Monday.";
+var DAY = 864e5;
+/** The Monday (UTC) starting the week that contains `now`, as YYYY-MM-DD. */
+function weekOf(now) {
+	const d = new Date(now), back = (d.getUTCDay() + 6) % 7;
+	return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - back)).toISOString().slice(0, 10);
+}
+var monthOf = (now) => new Date(now).toISOString().slice(0, 7);
+/** The allowance as it stands now: a new week starts from zero (the month's refill is remembered). */
+function currentAllowance(a, now) {
+	const week = weekOf(now);
+	if (a && a.week === week) return a;
+	return {
+		week,
+		used: 0,
+		extra: 0,
+		...a?.refillMonth ? { refillMonth: a.refillMonth } : {}
+	};
+}
+function allowanceView(a, now) {
+	const c = currentAllowance(a, now), left = Math.max(0, 15 + c.extra - c.used);
+	const refillAvailable = c.refillMonth !== monthOf(now);
+	return {
+		weekUsed: c.used,
+		weekLimit: 15,
+		weekExtra: c.extra,
+		weekLeft: left,
+		refillAvailable,
+		canRefill: left === 0 && refillAvailable,
+		weekResets: new Date(Date.parse(`${c.week}T00:00:00Z`) + 7 * DAY).toISOString().slice(0, 10)
+	};
+}
+/** Count one question; ok is false when the week's questions (and any refill added) are used up. */
+function takeQuestion(a, now) {
+	const c = currentAllowance(a, now);
+	if (c.used >= 15 + c.extra) return {
+		ok: false,
+		allowance: c
+	};
+	return {
+		ok: true,
+		allowance: {
+			...c,
+			used: c.used + 1
+		}
+	};
+}
+/** Give a counted question back (the answer failed). */
+function returnQuestion(a, now) {
+	const c = currentAllowance(a, now);
+	return {
+		...c,
+		used: Math.max(0, c.used - 1)
+	};
+}
+/** Use the month's refill: only when this week's questions are used up, once per calendar month, never stacked. */
+function useRefill(a, now) {
+	const c = currentAllowance(a, now);
+	if (c.refillMonth === monthOf(now)) return {
+		ok: false,
+		reason: "used",
+		allowance: c
+	};
+	if (c.used < 15 + c.extra) return {
+		ok: false,
+		reason: "not_needed",
+		allowance: c
+	};
+	return {
+		ok: true,
+		allowance: {
+			...c,
+			extra: c.extra + 15,
+			refillMonth: monthOf(now)
+		}
+	};
+}
+/** Only a member's own questions count, and only while membership is switched on; suggested questions never do. */
+var countsAgainstAllowance = (membership, member, suggested) => membership && member && !suggested;
+/** Check a Stripe-Signature header (t=…,v1=…): HMAC-SHA256 of `${t}.${rawBody}`, at most `tolerance` seconds old. */
+function verifyStripeSignature(raw, header, secret, nowSeconds, tolerance = 300) {
+	if (!header || !secret) return false;
+	let t = NaN;
+	const sigs = [];
+	for (const part of header.split(",")) {
+		const i = part.indexOf("=");
+		if (i < 0) continue;
+		const k = part.slice(0, i).trim(), v = part.slice(i + 1).trim();
+		if (k === "t") t = /^\d+$/.test(v) ? Number(v) : NaN;
+		else if (k === "v1") sigs.push(v);
+	}
+	if (!Number.isFinite(t) || !sigs.length) return false;
+	if (nowSeconds - t > tolerance || t - nowSeconds > tolerance) return false;
+	const expected = createHmac("sha256", secret).update(`${t}.`).update(raw).digest();
+	let ok = false;
+	for (const s of sigs) if (/^[0-9a-f]{64}$/.test(s) && timingSafeEqual(Buffer.from(s, "hex"), expected)) ok = true;
+	return ok;
+}
+var stripeEnvFrom = (env) => ({
+	secretKey: env.STRIPE_SECRET_KEY?.trim(),
+	webhookSecret: env.STRIPE_WEBHOOK_SECRET?.trim(),
+	priceMonthly: env.STRIPE_PRICE_MONTHLY?.trim(),
+	priceYearly: env.STRIPE_PRICE_YEARLY?.trim(),
+	trialDays: Math.max(0, Math.floor(Number(env.STRIPE_TRIAL_DAYS ?? 0)) || 0)
+});
+var idOf = (v) => typeof v === "string" ? v : v && typeof v === "object" && typeof v.id === "string" ? v.id : void 0;
+var send = (res, status, body) => {
+	res.writeHead(status, {
+		"content-type": "application/json",
+		"cache-control": "no-store"
+	});
+	res.end(JSON.stringify(body));
+};
+async function readRaw(req, limit) {
+	const chunks = [];
+	let n = 0;
+	for await (const c of req) {
+		const b = Buffer.isBuffer(c) ? c : Buffer.from(c);
+		n += b.length;
+		if (n > limit) return null;
+		chunks.push(b);
+	}
+	return Buffer.concat(chunks);
+}
+var SUBSCRIPTION_EVENTS = /* @__PURE__ */ new Set([
+	"customer.subscription.created",
+	"customer.subscription.updated",
+	"customer.subscription.deleted"
+]);
+function createBilling(opts) {
+	const { accounts, stripe: env } = opts, store = accounts.store;
+	const clock = opts.clock ?? (() => Date.now()), fetcher = opts.fetcher ?? fetch, log = opts.log ?? ((m) => console.log(m));
+	const site = (opts.site ?? "https://climaclue.com").replace(/\/$/, "");
+	const configured = !!(env.secretKey && env.webhookSecret && env.priceMonthly && env.priceYearly);
+	const open = configured && opts.membership;
+	const checkoutLimit = rateLimiter(20, 6e5, clock);
+	const priceFor = (plan) => plan === "yearly" ? env.priceYearly : env.priceMonthly;
+	const planFor = (price) => price === env.priceYearly ? "yearly" : price === env.priceMonthly ? "monthly" : void 0;
+	async function api(path, params) {
+		const r = await fetcher(`https://api.stripe.com/v1/${path}`, {
+			method: params ? "POST" : "GET",
+			headers: {
+				authorization: `Bearer ${env.secretKey}`,
+				...params ? { "content-type": "application/x-www-form-urlencoded" } : {}
+			},
+			...params ? { body: new URLSearchParams(params).toString() } : {}
+		});
+		const j = await r.json().catch(() => ({}));
+		if (!r.ok) throw new Error(`Stripe ${path}: HTTP ${r.status} ${j?.error?.message ?? ""}`.trim());
+		return j;
+	}
+	/** Store a subscription's state on its account (found by account id, customer id, or the id put in its metadata). */
+	function applySubscription(sub, at, userId) {
+		const customer = idOf(sub.customer);
+		const user = (userId ? store.getUser(userId) : null) ?? (customer ? store.findByCustomer(customer) : null) ?? (typeof sub.metadata?.account_id === "string" ? store.getUser(sub.metadata.account_id) : null);
+		if (!user) {
+			log(`stripe: subscription ${sub.id} has no matching account yet`);
+			return;
+		}
+		const active = sub.status === "active" || sub.status === "trialing" || sub.status === "past_due";
+		if (user.subscriptionId && user.subscriptionId !== sub.id && !active && isMember({
+			...user,
+			member: false
+		}, clock())) return;
+		if (user.subscriptionId === sub.id && typeof user.billingAt === "number" && at < user.billingAt) return;
+		const item = sub.items?.data?.[0];
+		const periodEnd = Number(sub.current_period_end ?? item?.current_period_end) || void 0;
+		store.updateUser(user.id, {
+			stripeCustomerId: customer ?? user.stripeCustomerId,
+			subscriptionId: sub.id,
+			plan: planFor(idOf(item?.price)) ?? user.plan,
+			status: String(sub.status ?? ""),
+			periodEnd,
+			cancelAtPeriodEnd: sub.cancel_at_period_end === true || !!sub.cancel_at,
+			billingAt: at
+		});
+	}
+	/** Apply one verified Stripe event. Throws on a failure Stripe should retry. */
+	async function applyEvent(event) {
+		const obj = event.data?.object ?? {}, at = Number(event.created) || Math.floor(clock() / 1e3);
+		if (event.type === "checkout.session.completed") {
+			if (obj.mode !== "subscription") return;
+			const user = typeof obj.client_reference_id === "string" ? store.getUser(obj.client_reference_id) : null;
+			if (!user) {
+				log(`stripe: checkout ${obj.id} for an unknown account`);
+				return;
+			}
+			const customer = idOf(obj.customer), subscription = idOf(obj.subscription);
+			store.updateUser(user.id, {
+				stripeCustomerId: customer ?? user.stripeCustomerId,
+				...subscription ? { subscriptionId: subscription } : {}
+			});
+			if (subscription) applySubscription(await api(`subscriptions/${encodeURIComponent(subscription)}`, null), Math.max(at, Math.floor(clock() / 1e3)), user.id);
+			return;
+		}
+		if (SUBSCRIPTION_EVENTS.has(event.type)) {
+			applySubscription(obj, at);
+			return;
+		}
+		if (event.type === "invoice.payment_failed") {
+			log(`stripe: payment failed for customer ${idOf(obj.customer) ?? "?"} (invoice ${obj.id})`);
+			return;
+		}
+	}
+	/** Returns the HTTP reply for a webhook delivery (exported for tests through handle()). */
+	async function webhook(raw, signature) {
+		if (!verifyStripeSignature(raw, signature, env.webhookSecret, Math.floor(clock() / 1e3))) return [400, { error: "Bad signature" }];
+		let event;
+		try {
+			event = JSON.parse(raw.toString("utf8"));
+		} catch {
+			return [400, { error: "Bad request" }];
+		}
+		if (typeof event?.id !== "string" || typeof event.type !== "string") return [400, { error: "Bad request" }];
+		if (!store.markEvent(event.id)) return [200, {
+			received: true,
+			duplicate: true
+		}];
+		try {
+			await applyEvent(event);
+		} catch (e) {
+			store.forgetEvent(event.id);
+			log(`stripe: ${event.type} ${event.id} failed: ${e.message}`);
+			return [500, { error: "Not processed" }];
+		}
+		return [200, { received: true }];
+	}
+	const allowanceFor = (u) => allowanceView(store.getAllowance(u.id), clock());
+	async function handle(req, res, path) {
+		if (path !== "/api/billing/checkout" && path !== "/api/billing/portal" && path !== "/api/stripe/webhook" && path !== "/api/allowance/refill") return false;
+		if (req.method !== "POST") {
+			send(res, 405, { error: "Method not allowed" });
+			return true;
+		}
+		if (path === "/api/stripe/webhook") {
+			if (!configured) {
+				send(res, 503, { error: NOT_OPEN });
+				return true;
+			}
+			const raw = await readRaw(req, 512e3);
+			if (!raw) {
+				send(res, 413, { error: "Too large" });
+				return true;
+			}
+			const [status, body] = await webhook(raw, req.headers["stripe-signature"]);
+			send(res, status, body);
+			return true;
+		}
+		if (!(path === "/api/billing/portal" ? configured : open)) {
+			send(res, 503, { error: NOT_OPEN });
+			return true;
+		}
+		if (!sameSiteRequest(req, accounts.allowedOrigins)) {
+			send(res, 403, { error: "Forbidden" });
+			return true;
+		}
+		const user = accounts.userFor(req);
+		if (!user) {
+			send(res, 401, { error: "Sign in first: the Sign in button is at the top right of the globe." });
+			return true;
+		}
+		if (path === "/api/allowance/refill") {
+			if (!isMember(user, clock())) {
+				send(res, 403, { error: "The monthly refill is for members." });
+				return true;
+			}
+			const r = useRefill(store.getAllowance(user.id), clock());
+			if (r.ok) {
+				store.setAllowance(user.id, r.allowance);
+				send(res, 200, { allowance: allowanceView(r.allowance, clock()) });
+				return true;
+			}
+			send(res, 409, {
+				error: r.reason === "used" ? "You’ve used this month’s refill. Your questions come back on Monday." : "You still have questions left this week.",
+				allowance: allowanceView(r.allowance, clock())
+			});
+			return true;
+		}
+		if (!checkoutLimit(user.id)) {
+			send(res, 429, { error: "Too many tries. Wait a few minutes and try again." });
+			return true;
+		}
+		if (path === "/api/billing/portal") {
+			if (!user.stripeCustomerId) {
+				send(res, 404, { error: "No membership billing found for this account." });
+				return true;
+			}
+			try {
+				send(res, 200, { url: (await api("billing_portal/sessions", {
+					customer: user.stripeCustomerId,
+					return_url: `${site}/membership/`
+				})).url });
+			} catch (e) {
+				log(`stripe: portal failed: ${e.message}`);
+				send(res, 502, { error: "Membership settings couldn’t open just now. Try again shortly." });
+			}
+			return true;
+		}
+		let body = {};
+		const raw = await readRaw(req, 2e3);
+		if (!raw) {
+			send(res, 413, { error: "Too large" });
+			return true;
+		}
+		try {
+			body = JSON.parse(raw.toString("utf8") || "{}");
+		} catch {
+			send(res, 400, { error: "Bad request" });
+			return true;
+		}
+		const plan = body?.plan;
+		if (plan !== "monthly" && plan !== "yearly") {
+			send(res, 400, { error: "Choose monthly or yearly." });
+			return true;
+		}
+		if (isMember(user, clock())) {
+			send(res, 409, { error: "You’re already a member." });
+			return true;
+		}
+		const params = {
+			mode: "subscription",
+			"line_items[0][price]": priceFor(plan),
+			"line_items[0][quantity]": "1",
+			client_reference_id: user.id,
+			"subscription_data[metadata][account_id]": user.id,
+			success_url: `${site}/membership/?status=success`,
+			cancel_url: `${site}/membership/?status=cancelled`,
+			allow_promotion_codes: "false"
+		};
+		if (user.stripeCustomerId) params.customer = user.stripeCustomerId;
+		else params.customer_email = user.email;
+		if (env.trialDays) params["subscription_data[trial_period_days]"] = String(env.trialDays);
+		try {
+			const s = await api("checkout/sessions", params);
+			if (typeof s.url !== "string") throw new Error("no url");
+			send(res, 200, { url: s.url });
+		} catch (e) {
+			log(`stripe: checkout failed: ${e.message}`);
+			send(res, 502, { error: "Checkout couldn’t start just now. Try again shortly." });
+		}
+		return true;
+	}
+	return {
+		configured,
+		open,
+		handle,
+		applyEvent,
+		/** Fields for GET /api/config. */
+		config: () => ({ billingOpen: open }),
+		/** Fields for GET /api/me: the week's questions, for members. */
+		me: (u) => ({ allowance: isMember(u, clock()) ? allowanceFor(u) : null }),
+		allowanceFor,
+		/** Count one of a member's own questions. */
+		takeQuestion(userId) {
+			const r = takeQuestion(store.getAllowance(userId), clock());
+			if (r.ok) store.setAllowance(userId, r.allowance);
+			return {
+				ok: r.ok,
+				allowance: allowanceView(r.allowance, clock())
+			};
+		},
+		returnQuestion(userId) {
+			store.setAllowance(userId, returnQuestion(store.getAllowance(userId), clock()));
+		}
 	};
 }
 // api/server.ts
@@ -28594,6 +29048,9 @@ function createAccounts(opts) {
 * Visitor addresses are only kept in memory to count today's questions; questions are not logged.
 * Also serves accounts ("Sign in with Google", saved places, member flag; see accounts.ts), switched on by
 * CLIMACLUE_GOOGLE_CLIENT_ID. Without it the site behaves as before: no sign-in, everything kept in the browser.
+* Also serves membership billing (Stripe Checkout, see billing.ts), dormant until the four STRIPE_* settings are in
+* /etc/climaclue/api.env, and open to buyers only with CLIMACLUE_MEMBERSHIP=on as well. With membership on, a member's
+* own questions count against 15 a week plus one monthly refill (suggested questions are never counted).
 * Usage: node climaclue-api.mjs            (serve)
 *        node climaclue-api.mjs --set-member <email> true|false   (admin: mark an account as a member, or not)
 *        node climaclue-api.mjs --list-users | --delete-user <email>
@@ -28620,10 +29077,19 @@ var TABS = [
 	"snow"
 ];
 mkdirSync(STATE, { recursive: true });
+var billing = null;
 var accounts = createAccounts({
 	clientId: (process.env.CLIMACLUE_GOOGLE_CLIENT_ID ?? "").trim(),
 	stateDir: STATE,
-	allowedOrigins: (process.env.CLIMACLUE_ORIGINS ?? "https://climaclue.com,https://www.climaclue.com").split(",").map((s) => s.trim()).filter(Boolean)
+	allowedOrigins: (process.env.CLIMACLUE_ORIGINS ?? "https://climaclue.com,https://www.climaclue.com").split(",").map((s) => s.trim()).filter(Boolean),
+	config: () => billing?.config() ?? { billingOpen: false },
+	me: (u) => billing?.me(u) ?? {}
+});
+billing = createBilling({
+	accounts,
+	stripe: stripeEnvFrom(process.env),
+	membership: MEMBERSHIP,
+	site: process.env.CLIMACLUE_SITE ?? "https://climaclue.com"
 });
 var fileFetcher = (async (url) => {
 	const path = `${DATA}/squares/${String(url).split("?")[0].replace(/^.*\/squares\//, "")}`;
@@ -28820,6 +29286,7 @@ async function handle(req, res) {
 		accounts: accounts.enabled
 	});
 	if (await accounts.handle(req, res, path)) return;
+	if (await billing.handle(req, res, path)) return;
 	if (path !== "/api/ask" || req.method !== "POST") return json(res, 404, { error: "Not found" });
 	let raw = "";
 	for await (const chunk of req) {
@@ -28848,20 +29315,30 @@ async function handle(req, res) {
 		square: await load(p)
 	})))).filter((p) => !!p.square);
 	if (!ok.length) return json(res, 422, { error: "No climate data for that place" });
-	if (MEMBERSHIP && !accounts.userFor(req)?.member) {
+	const user = accounts.userFor(req), member = isMember(user);
+	const town = places[0].name.split(",")[0], other = places[1]?.name.split(",")[0] ?? null;
+	const offered = tab === "trip" ? Array.from({ length: 12 }, (_, m) => [town, null].flatMap((t) => tripQuestions(ok[0].square, t, m, ok.length > 1 ? other : null))).flat() : [...suggestQuestions(ok[0].square, tab, null), ...suggestQuestions(ok[0].square, tab, town)];
+	const suggested = !!body.suggestionId && offered.some((s) => s.id === body.suggestionId && s.text === question);
+	if (MEMBERSHIP && !member) {
 		if (tab === "trip") return json(res, 403, { error: "Planning trips with ClimaClue is for members." });
-		const town = places[0].name.split(",")[0], other = places[1]?.name.split(",")[0] ?? null;
-		const offered = tab === "trip" ? Array.from({ length: 12 }, (_, m) => [town, null].flatMap((t) => tripQuestions(ok[0].square, t, m, ok.length > 1 ? other : null))).flat() : [...suggestQuestions(ok[0].square, tab, null), ...suggestQuestions(ok[0].square, tab, town)];
-		if (!body.suggestionId || !offered.some((s) => s.id === body.suggestionId && s.text === question)) return json(res, 403, { error: "Asking your own questions is for members. The suggested questions are free." });
+		if (!suggested) return json(res, 403, { error: "Asking your own questions is for members. The suggested questions are free." });
 	}
-	const key = body.suggestionId && tab !== "trip" && ok.length === 1 && !history.length ? `v2|${ok[0].square.id}|${tab}|${body.suggestionId}` : null;
+	const key = suggested && tab !== "trip" && ok.length === 1 && !history.length ? `v2|${ok[0].square.id}|${tab}|${body.suggestionId}` : null;
 	if (key && stored.has(key)) return json(res, 200, {
 		answer: stored.get(key),
 		stored: true
 	});
 	if (!client) return json(res, 503, { error: "ClimaClue’s chat isn’t switched on yet." });
 	if (overCap()) return json(res, 503, { error: "ClimaClue has answered all the questions it can this month. Suggested questions for big cities still work." });
-	if (!allow(clientIp(req))) return json(res, 429, { error: `You’ve asked ${PER_VISITOR} questions today. Come back tomorrow for more.` });
+	const counted = countsAgainstAllowance(MEMBERSHIP, member, suggested) && !!user;
+	if (counted) {
+		const t = billing.takeQuestion(user.id);
+		if (!t.ok) return json(res, 429, {
+			error: OUT_OF_QUESTIONS,
+			canRefill: t.allowance.canRefill,
+			allowance: t.allowance
+		});
+	} else if (!allow(clientIp(req))) return json(res, 429, { error: `You’ve asked ${PER_VISITOR} questions today. Come back tomorrow for more.` });
 	try {
 		const { text, proposal, explore } = await answer(ok, question, tab, history);
 		if (key && !proposal && !explore) store(key, text);
@@ -28869,9 +29346,11 @@ async function handle(req, res) {
 			answer: text,
 			stored: false,
 			...proposal ? { compare: proposal } : {},
-			...explore ? { explore } : {}
+			...explore ? { explore } : {},
+			...MEMBERSHIP && member && user ? { allowance: billing.allowanceFor(user) } : {}
 		});
 	} catch (e) {
+		if (counted) billing.returnQuestion(user.id);
 		const status = e instanceof Anthropic.RateLimitError ? 429 : 502;
 		return json(res, status, { error: status === 429 ? "ClimaClue is busy right now. Try again in a minute." : "ClimaClue couldn’t answer just now. Try again shortly." });
 	}
@@ -28943,7 +29422,7 @@ async function prewarm(n, perTab) {
 function admin(args) {
 	const [cmd, email, value] = args;
 	if (cmd === "--list-users") {
-		for (const u of accounts.store.listUsers()) console.log(`${u.email}\t${u.member ? "member" : "free"}\t${u.name}\tsince ${u.createdAt.slice(0, 10)}`);
+		for (const u of accounts.store.listUsers()) console.log(`${u.email}\t${isMember(u) ? u.member ? "member (manual)" : `member (${u.plan ?? "paid"})` : "free"}\t${u.name}\tsince ${u.createdAt.slice(0, 10)}`);
 		return 0;
 	}
 	if (cmd === "--set-member") {
@@ -28955,7 +29434,7 @@ function admin(args) {
 			console.error(`No account with the email ${email}. They need to sign in once first.`);
 			return 1;
 		}
-		console.log(`${email}: member = ${value}`);
+		console.log(`${email}: manual member flag = ${value}${value === "false" && accounts.store.findByEmail(email).some((u) => isMember(u)) ? " (still a member through a paid subscription)" : ""}`);
 		return 0;
 	}
 	if (cmd === "--delete-user") {
@@ -28982,5 +29461,5 @@ else if (process.argv[2] === "--prewarm") prewarm(Number(process.argv[3] ?? 1e3)
 });
 else http.createServer((req, res) => {
 	handle(req, res).catch(() => json(res, 500, { error: "Something went wrong" }));
-}).listen(Number(process.env.PORT ?? 8090), "127.0.0.1", () => console.log("ClimaClue chat service on 127.0.0.1:" + (process.env.PORT ?? 8090), client ? "(key loaded)" : "(no key: chat off)", accounts.enabled ? "(accounts on)" : "(no Google client ID: accounts off)"));
+}).listen(Number(process.env.PORT ?? 8090), "127.0.0.1", () => console.log("ClimaClue chat service on 127.0.0.1:" + (process.env.PORT ?? 8090), client ? "(key loaded)" : "(no key: chat off)", accounts.enabled ? "(accounts on)" : "(no Google client ID: accounts off)", billing.open ? "(membership billing open)" : billing.configured ? "(Stripe configured; membership off)" : "(no Stripe settings: billing off)"));
 export { ToolError as a, decodeUTF8 as c, __classPrivateFieldGet as d, __classPrivateFieldSet as f, checkMemorySyncInterval as i, encodeUTF8 as l, DEFAULT_MEMORY_SYNC_INTERVAL_MS as n, isStatus as o, __exportAll as p, MIN_MEMORY_SYNC_INTERVAL_MS as r, loggerFor as s, promiseWithResolvers as t, AnthropicError as u };
