@@ -196,6 +196,8 @@ h2{font-size:32px;letter-spacing:-.6px;margin:64px 0 8px;text-align:center}h2+.s
     }).catch(function () { soon(); say('Membership is coming soon. Everything free on ClimaClue stays free.'); });
   }
   load();
+  // Coming back with the Back button from Stripe restores the old page (buttons stuck on "Opening…"): reload it fresh.
+  window.addEventListener('pageshow', function (e) { if (e.persisted) location.reload(); });
 })();
 </script>
 </body></html>
