@@ -169,7 +169,12 @@ h2{font-size:32px;letter-spacing:-.6px;margin:64px 0 8px;text-align:center}h2+.s
     var box = document.getElementById('member-box'); box.hidden = false;
     document.getElementById('member-plan').textContent = user.plan === 'yearly' ? 'Plan: yearly, $12 a year.' : user.plan === 'monthly' ? 'Plan: monthly, $2.50 a month.' : 'Your account has membership.';
     document.getElementById('member-renew').textContent = user.periodEnd ? (user.cancelAtPeriodEnd ? 'Cancelled: your membership ends on ' + date(user.periodEnd) + '.' : 'Renews on ' + date(user.periodEnd) + '.') : '';
-    if (allowance) document.getElementById('member-questions').textContent = 'This week: ' + allowance.weekLeft + ' of ' + (allowance.weekLimit + allowance.weekExtra) + ' questions left' + (allowance.refillAvailable ? ', and this month’s refill is ready.' : '.');
+    if (allowance) document.getElementById('member-questions').textContent = 'This week: ' + allowance.weekLeft + (allowance.weekLeft === 1 ? ' question' : ' questions') + ' left. ' + (allowance.refillAvailable ? 'This month’s refill is ready.' : 'This month’s refill has been used; a new one comes on the 1st.');
+    if (user.cancelAtPeriodEnd) document.getElementById('member-title').textContent = 'Your membership is cancelled';
+    // A member doesn't need the sales pitch at the top: the button goes to their membership box instead.
+    var go = document.querySelector('.hero .go'); if (go) { go.textContent = 'Your membership ›'; go.setAttribute('href', '#plans-title'); }
+    var h = document.querySelector('.hero h1'); if (h) h.textContent = user.cancelAtPeriodEnd ? 'Thanks for being a member' : 'You’re a ClimaClue member';
+    var pt = document.getElementById('plans-title'); if (pt) pt.textContent = 'Your membership';
     var manage = document.getElementById('manage');
     if (user.plan) {
       manage.hidden = false;

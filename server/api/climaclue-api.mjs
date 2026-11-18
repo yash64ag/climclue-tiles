@@ -29203,7 +29203,7 @@ function nearTown(lon, lat) {
 	const km = Math.round(Math.sqrt(bd) * 111);
 	return `${km < 5 ? "in" : `${km} km from`} ${t.n[best]}, ${t.countries[t.c[best]]}`;
 }
-async function answer(places, question, tab, history) {
+async function answer(places, question, tab, history, imperial = false) {
 	const data = places.map((p) => {
 		const ctx = placeContext(p.name, p.square, stations, snowStations);
 		if (tab !== "trip") return ctx;
@@ -29223,7 +29223,7 @@ async function answer(places, question, tab, history) {
 	});
 	messages.push({
 		role: "user",
-		content: `DATA (from ClimaClue's own layers):\n${JSON.stringify(data)}\n\nThe visitor is on the ${tab} tab, looking at: ${places.map((p) => p.name).join(" and ")}.\nQuestion: ${question}`
+		content: `DATA (from ClimaClue's own layers):\n${JSON.stringify(data)}\n\nThe visitor is on the ${tab} tab, looking at: ${places.map((p) => p.name).join(" and ")}.${imperial ? `\nUnits: the visitor uses US units. Give temperatures in °F, rain and snow in inches and wind in mph (convert from DATA: °F = °C × 1.8 + 32, a temperature difference × 1.8, inches = mm ÷ 25.4, mph = m/s × 2.237), with metric in brackets the first time.` : ""}\nQuestion: ${question}`
 	});
 	let proposal = null, explore = null;
 	const said = [];
@@ -29308,7 +29308,7 @@ async function handle(req, res) {
 	let raw = "";
 	for await (const chunk of req) {
 		raw += chunk;
-		if (raw.length > 8e3) return json(res, 413, { error: "Too long" });
+		if (raw.length > 32e3) return json(res, 413, { error: "That conversation is too long. Close the chat and start a new one." });
 	}
 	let body;
 	try {
@@ -29341,7 +29341,8 @@ async function handle(req, res) {
 		if (tab === "trip") return json(res, 403, { error: "Planning trips with ClimaClue is for members." });
 		if (!suggested) return json(res, 403, { error: "Asking your own questions is for members. The suggested questions are free." });
 	}
-	const key = suggested && tab !== "trip" && ok.length === 1 && !history.length ? `v2|${ok[0].square.id}|${tab}|${body.suggestionId}` : null;
+	const imperial = body.units === "imperial";
+	const key = suggested && tab !== "trip" && ok.length === 1 && !history.length ? `v2|${ok[0].square.id}|${tab}|${body.suggestionId}${imperial ? "|imperial" : ""}` : null;
 	if (key && stored.has(key)) return json(res, 200, {
 		answer: stored.get(key),
 		stored: true
@@ -29358,7 +29359,7 @@ async function handle(req, res) {
 		});
 	} else if (!allow(clientIp(req))) return json(res, 429, { error: `You’ve asked ${PER_VISITOR} questions today. Come back tomorrow for more.` });
 	try {
-		const { text, proposal, explore } = await answer(ok, question, tab, history);
+		const { text, proposal, explore } = await answer(ok, question, tab, history, imperial);
 		if (key && !proposal && !explore) store(key, text);
 		return json(res, 200, {
 			answer: text,
