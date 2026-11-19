@@ -28417,6 +28417,14 @@ function createAccountStore(dir, clock = () => Date.now()) {
 			if (users.length) save("users");
 			return users.length;
 		},
+		/** Admin: start an account's weekly questions and monthly refill afresh. Returns how many changed. */
+		resetAllowance(email) {
+			fresh();
+			const users = byEmail(email);
+			for (const u of users) delete data.allowance[u.id];
+			if (users.length) save("allowance");
+			return users.length;
+		},
 		/** Admin: forget an account's Stripe billing (e.g. a sandbox test membership before going live). Returns how many changed. */
 		clearBilling(email) {
 			fresh();
@@ -28428,8 +28436,12 @@ function createAccountStore(dir, clock = () => Date.now()) {
 				delete u.status;
 				delete u.periodEnd;
 				delete u.cancelAtPeriodEnd;
+				delete data.allowance[u.id];
 			}
-			if (users.length) save("users");
+			if (users.length) {
+				save("users");
+				save("allowance");
+			}
 			return users.length;
 		},
 		findByEmail(email) {
@@ -29085,7 +29097,8 @@ function createBilling(opts) {
 * own questions count against 15 a week plus one monthly refill (suggested questions are never counted).
 * Usage: node climaclue-api.mjs            (serve)
 *        node climaclue-api.mjs --set-member <email> true|false   (admin: mark an account as a member, or not)
-*        node climaclue-api.mjs --clear-billing <email>           (admin: forget an account's Stripe billing, e.g. a sandbox test)
+*        node climaclue-api.mjs --reset-questions <email>         (admin: give an account a fresh 15 questions and refill)
+*        node climaclue-api.mjs --clear-billing <email>           (admin: forget an account's Stripe billing and question count, e.g. a sandbox test)
 *        node climaclue-api.mjs --list-users | --delete-user <email>
 *        node climaclue-api.mjs --prewarm N [K] (store answers to the top K suggested questions per tab, default 3,
 *        for the N biggest cities, with the Batch API at half price)
@@ -29473,6 +29486,15 @@ function admin(args) {
 		console.log(`${email}: manual member flag = ${value}${value === "false" && accounts.store.findByEmail(email).some((u) => isMember(u)) ? " (still a member through a paid subscription)" : ""}`);
 		return 0;
 	}
+	if (cmd === "--reset-questions") {
+		if (!email) {
+			console.error("Usage: --reset-questions <email>");
+			return 2;
+		}
+		const n = accounts.store.resetAllowance(email);
+		console.log(n ? `${email}: questions reset (15 this week, monthly refill ready).` : `No account with the email ${email}.`);
+		return n ? 0 : 1;
+	}
 	if (cmd === "--clear-billing") {
 		if (!email) {
 			console.error("Usage: --clear-billing <email>");
@@ -29497,6 +29519,7 @@ function admin(args) {
 var adminExit = [
 	"--list-users",
 	"--set-member",
+	"--reset-questions",
 	"--clear-billing",
 	"--delete-user"
 ].includes(process.argv[2]) ? admin(process.argv.slice(2)) : -1;
