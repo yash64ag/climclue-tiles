@@ -28421,7 +28421,16 @@ function createAccountStore(dir, clock = () => Date.now()) {
 		resetAllowance(email) {
 			fresh();
 			const users = byEmail(email);
-			for (const u of users) delete data.allowance[u.id];
+			for (const u of users) {
+				const pack = data.allowance[u.id]?.pack;
+				if (pack) data.allowance[u.id] = {
+					week: "",
+					used: 0,
+					extra: 0,
+					pack
+				};
+				else delete data.allowance[u.id];
+			}
 			if (users.length) save("allowance");
 			return users.length;
 		},
@@ -28705,7 +28714,7 @@ function createAccounts(opts) {
 	};
 }
 var NOT_OPEN = "Membership isn’t open yet.";
-var OUT_OF_QUESTIONS = "You’ve used this week’s 15 questions. Use your monthly refill, or they come back on Monday.";
+var OUT_OF_QUESTIONS = "You’ve used this week’s 15 questions. Use your monthly refill, buy 100 more, or they come back on Monday.";
 var DAY = 864e5;
 /** The Monday (UTC) starting the week that contains `now`, as YYYY-MM-DD. */
 function weekOf(now) {
@@ -28721,7 +28730,8 @@ function currentAllowance(a, now) {
 		week,
 		used: 0,
 		extra: 0,
-		...a?.refillMonth ? { refillMonth: a.refillMonth } : {}
+		...a?.refillMonth ? { refillMonth: a.refillMonth } : {},
+		...a?.pack ? { pack: a.pack } : {}
 	};
 }
 function allowanceView(a, now) {
@@ -28734,27 +28744,42 @@ function allowanceView(a, now) {
 		weekLeft: left,
 		refillAvailable,
 		canRefill: left === 0 && refillAvailable,
+		packLeft: c.pack ?? 0,
 		weekResets: new Date(Date.parse(`${c.week}T00:00:00Z`) + 7 * DAY).toISOString().slice(0, 10)
 	};
 }
-/** Count one question; ok is false when the week's questions (and any refill added) are used up. */
+/** Count one question: from the week's (and any refill added) first, then from bought questions; ok is false when all are used up. */
 function takeQuestion(a, now) {
 	const c = currentAllowance(a, now);
-	if (c.used >= 15 + c.extra) return {
-		ok: false,
-		allowance: c
-	};
-	return {
+	if (c.used < 15 + c.extra) return {
 		ok: true,
 		allowance: {
 			...c,
-			used: c.used + 1
+			used: c.used + 1,
+			lastPack: false
 		}
+	};
+	if ((c.pack ?? 0) > 0) return {
+		ok: true,
+		allowance: {
+			...c,
+			pack: c.pack - 1,
+			lastPack: true
+		}
+	};
+	return {
+		ok: false,
+		allowance: c
 	};
 }
 /** Give a counted question back (the answer failed). */
 function returnQuestion(a, now) {
 	const c = currentAllowance(a, now);
+	if (c.lastPack) return {
+		...c,
+		pack: (c.pack ?? 0) + 1,
+		lastPack: false
+	};
 	return {
 		...c,
 		used: Math.max(0, c.used - 1)
@@ -28780,6 +28805,14 @@ function useRefill(a, now) {
 			extra: c.extra + 15,
 			refillMonth: monthOf(now)
 		}
+	};
+}
+/** Add a bought pack. */
+function addPack(a, now, size = 100) {
+	const c = currentAllowance(a, now);
+	return {
+		...c,
+		pack: (c.pack ?? 0) + size
 	};
 }
 /** Only a member's own questions count, and only while membership is switched on; suggested questions never do. */
@@ -28808,6 +28841,7 @@ var stripeEnvFrom = (env) => ({
 	webhookSecret: env.STRIPE_WEBHOOK_SECRET?.trim(),
 	priceMonthly: env.STRIPE_PRICE_MONTHLY?.trim(),
 	priceYearly: env.STRIPE_PRICE_YEARLY?.trim(),
+	pricePack: env.STRIPE_PRICE_PACK?.trim() || void 0,
 	trialDays: Math.max(0, Math.floor(Number(env.STRIPE_TRIAL_DAYS ?? 0)) || 0),
 	managedPayments: (env.STRIPE_MANAGED_PAYMENTS ?? "on").trim() !== "off",
 	testers: (env.CLIMACLUE_BILLING_TESTERS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean)
@@ -28890,6 +28924,19 @@ function createBilling(opts) {
 	/** Apply one verified Stripe event. Throws on a failure Stripe should retry. */
 	async function applyEvent(event) {
 		const obj = event.data?.object ?? {}, at = Number(event.created) || Math.floor(clock() / 1e3);
+		if ((event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") && obj.mode === "payment") {
+			if (obj.metadata?.kind !== "pack" || obj.payment_status !== "paid") return;
+			const buyer = typeof obj.client_reference_id === "string" ? store.getUser(obj.client_reference_id) : null;
+			if (!buyer) {
+				log(`stripe: pack checkout ${obj.id} for an unknown account`);
+				return;
+			}
+			const customer = idOf(obj.customer);
+			if (customer && !buyer.stripeCustomerId) store.updateUser(buyer.id, { stripeCustomerId: customer });
+			store.setAllowance(buyer.id, addPack(store.getAllowance(buyer.id), clock()));
+			log(`stripe: question pack added for account ${buyer.id}`);
+			return;
+		}
 		if (event.type === "checkout.session.completed") {
 			if (obj.mode !== "subscription") return;
 			const user = typeof obj.client_reference_id === "string" ? store.getUser(obj.client_reference_id) : null;
@@ -28937,7 +28984,12 @@ function createBilling(opts) {
 		}
 		return [200, { received: true }];
 	}
-	const allowanceFor = (u) => allowanceView(store.getAllowance(u.id), clock());
+	const packOffered = configured && !!env.pricePack;
+	const view = (a) => ({
+		...allowanceView(a, clock()),
+		packOffered
+	});
+	const allowanceFor = (u) => view(store.getAllowance(u.id));
 	async function handle(req, res, path) {
 		if (path !== "/api/billing/checkout" && path !== "/api/billing/portal" && path !== "/api/stripe/webhook" && path !== "/api/allowance/refill") return false;
 		if (req.method !== "POST") {
@@ -28983,12 +29035,12 @@ function createBilling(opts) {
 			const r = useRefill(store.getAllowance(user.id), clock());
 			if (r.ok) {
 				store.setAllowance(user.id, r.allowance);
-				send(res, 200, { allowance: allowanceView(r.allowance, clock()) });
+				send(res, 200, { allowance: view(r.allowance) });
 				return true;
 			}
 			send(res, 409, {
 				error: r.reason === "used" ? "You’ve used this month’s refill. Your questions come back on Monday." : "You still have questions left this week.",
-				allowance: allowanceView(r.allowance, clock())
+				allowance: view(r.allowance)
 			});
 			return true;
 		}
@@ -29022,6 +29074,38 @@ function createBilling(opts) {
 			body = JSON.parse(raw.toString("utf8") || "{}");
 		} catch {
 			send(res, 400, { error: "Bad request" });
+			return true;
+		}
+		if (body?.pack === true) {
+			if (!packOffered) {
+				send(res, 503, { error: "Extra questions aren’t on sale yet." });
+				return true;
+			}
+			if (!isMember(user, clock())) {
+				send(res, 403, { error: "Extra questions are for members." });
+				return true;
+			}
+			const pack = {
+				mode: "payment",
+				"line_items[0][price]": env.pricePack,
+				"line_items[0][quantity]": "1",
+				client_reference_id: user.id,
+				"metadata[kind]": "pack",
+				"metadata[account_id]": user.id,
+				success_url: `${site}/membership/?status=pack`,
+				cancel_url: `${site}/membership/?status=cancelled`
+			};
+			if (user.stripeCustomerId) pack.customer = user.stripeCustomerId;
+			else pack.customer_email = user.email;
+			if (env.managedPayments) pack["managed_payments[enabled]"] = "true";
+			try {
+				const s = await api("checkout/sessions", pack);
+				if (typeof s.url !== "string") throw new Error("no url");
+				send(res, 200, { url: s.url });
+			} catch (e) {
+				log(`stripe: pack checkout failed: ${e.message}`);
+				send(res, 502, { error: "Checkout couldn’t start just now. Try again shortly." });
+			}
 			return true;
 		}
 		const plan = body?.plan;
@@ -29064,7 +29148,10 @@ function createBilling(opts) {
 		applyEvent,
 		isTester,
 		/** Fields for GET /api/config. */
-		config: (u = null) => ({ billingOpen: openFor(u) }),
+		config: (u = null) => ({
+			billingOpen: openFor(u),
+			packOffered: packOffered && openFor(u)
+		}),
 		/** Fields for GET /api/me: the week's questions, for members. */
 		me: (u) => ({ allowance: isMember(u, clock()) ? allowanceFor(u) : null }),
 		allowanceFor,
@@ -29074,7 +29161,7 @@ function createBilling(opts) {
 			if (r.ok) store.setAllowance(userId, r.allowance);
 			return {
 				ok: r.ok,
-				allowance: allowanceView(r.allowance, clock())
+				allowance: view(r.allowance)
 			};
 		},
 		returnQuestion(userId) {
@@ -29190,7 +29277,18 @@ var members = () => {
 	};
 	return memberCount.n;
 };
-var monthlyCap = () => Math.max(CAP, members() * CAP_PER_MEMBER);
+var packCount = {
+	at: 0,
+	n: 0
+};
+var packsOutstanding = () => {
+	if (Date.now() - packCount.at > 6e5) packCount = {
+		at: Date.now(),
+		n: accounts.store.listUsers().reduce((n, u) => n + (accounts.store.getAllowance(u.id)?.pack ?? 0), 0) / 100
+	};
+	return packCount.n;
+};
+var monthlyCap = () => Math.max(CAP, (members() + packsOutstanding()) * CAP_PER_MEMBER);
 var overCap = () => spend.month === month() && spend.usd >= monthlyCap();
 var storeFile = `${STATE}/answers.jsonl`;
 var stored = /* @__PURE__ */ new Map();
