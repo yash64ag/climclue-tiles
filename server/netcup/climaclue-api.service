@@ -1,0 +1,37 @@
+[Unit]
+Description=ClimaClue API (chat, accounts, membership) on 127.0.0.1:3100
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=climaclue
+Group=climaclue
+ExecStart=/usr/bin/node /srv/climaclue/public/server/api/climaclue-api.mjs
+# The port is configurable; 3000 and 8001 belong to trick.games on this server.
+Environment=PORT=3100
+Environment=CLIMACLUE_DATA=/srv/climaclue/public
+# Accounts, memberships, saved places, stored answers and the month's spending (copied from the old server).
+Environment=STATE_DIRECTORY=/srv/climaclue/state
+# Public IDs, not secrets: Google sign-in client and the Stripe LIVE prices ($2.50/month, $12/year, $3 pack of 100 questions).
+Environment=CLIMACLUE_GOOGLE_CLIENT_ID=282136409150-vnavso7ml3motbrvdifj09a1h51nm4tt.apps.googleusercontent.com
+Environment=STRIPE_PRICE_MONTHLY=price_1UdINw9HRY8smAw3oGxQ7T4r
+Environment=STRIPE_PRICE_YEARLY=price_1UdIPu9HRY8smAw3qzNKduPT
+Environment=STRIPE_PRICE_PACK=price_1UdQuZ9HRY8smAw3PgobSABJ
+Environment=CLIMACLUE_MEMBERSHIP=on
+# Secrets (root-only file, mode 600, copied by hand from the old server's /etc/climaclue/api.env; never in Git).
+EnvironmentFile=/etc/climaclue/api.env
+# trick.games always gets the CPU first.
+Nice=10
+CPUWeight=20
+IOWeight=20
+MemoryMax=1G
+ProtectSystem=strict
+ReadWritePaths=/srv/climaclue/state
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
