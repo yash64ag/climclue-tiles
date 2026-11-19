@@ -29306,6 +29306,11 @@ var store = (key, answer) => {
 		answer
 	}) + "\n");
 };
+var snowRevised = /* @__PURE__ */ new Set();
+try {
+	snowRevised = new Set(JSON.parse(readFileSync(`${DATA}/squares/snow-revised-2026-11-19.json`, "utf8")).squares);
+} catch {}
+var answerKey = (squareId, tab, suggestionId, revised = snowRevised) => `v2|${squareId}|${tab}|${suggestionId}${(tab === "snow" || tab === "climate") && revised.has(squareId) ? "|snow2" : ""}`;
 var visitors = /* @__PURE__ */ new Map();
 var allow = (ip) => {
 	const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), v = visitors.get(ip);
@@ -29484,7 +29489,7 @@ async function handle(req, res) {
 		if (!suggested) return json(res, 403, { error: "Asking your own questions is for members. The suggested questions are free." });
 	}
 	const imperial = body.units === "imperial";
-	const key = suggested && tab !== "trip" && ok.length === 1 && !history.length ? `v2|${ok[0].square.id}|${tab}|${body.suggestionId}${imperial ? "|imperial" : ""}` : null;
+	const key = suggested && tab !== "trip" && ok.length === 1 && !history.length ? `${answerKey(ok[0].square.id, tab, body.suggestionId)}${imperial ? "|imperial" : ""}` : null;
 	if (key && stored.has(key)) return json(res, 200, {
 		answer: stored.get(key),
 		stored: true
@@ -29536,7 +29541,7 @@ async function prewarm(n, perTab) {
 		seen.add(id);
 		const data = placeContext(p.name, square, stations, snowStations);
 		for (const tab of TABS) for (const s of suggestQuestions(square, tab, towns.n[i]).slice(0, perTab)) {
-			const key = `v2|${square.id}|${tab}|${s.id}`;
+			const key = answerKey(square.id, tab, s.id);
 			if (stored.has(key)) continue;
 			const custom_id = `q${requests.length}`;
 			keys.set(custom_id, key);
