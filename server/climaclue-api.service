@@ -11,6 +11,7 @@ Environment=CLIMACLUE_GOOGLE_CLIENT_ID=282136409150-vnavso7ml3motbrvdifj09a1h51n
 # Stripe LIVE price IDs (not secret): ClimaClue membership, $2.50 a month and $12 a year, tax included.
 Environment=STRIPE_PRICE_MONTHLY=price_1UdINw9HRY8smAw3oGxQ7T4r
 Environment=STRIPE_PRICE_YEARLY=price_1UdIPu9HRY8smAw3qzNKduPT
+Environment=STRIPE_PRICE_PACK=price_1UdQuZ9HRY8smAw3PgobSABJ
 # Membership is open (Yash, 19 Nov 2026): own questions, unlimited games, saving places, the places chat and the full
 # Matchmaker list are for members; everyone keeps the free features.
 Environment=CLIMACLUE_MEMBERSHIP=on
