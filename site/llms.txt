@@ -1,0 +1,23 @@
+# ClimaClue
+
+> ClimaClue (https://climaclue.com/) is a free interactive climate map on a 3D globe. Click any place on Earth to see its Köppen–Geiger climate zone and its monthly temperature (average, day highs, night lows), precipitation, snowfall, sunshine, wind, humidity and dew point. It also compares two places side by side, finds towns that match a climate you describe, and has daily climate quiz games.
+
+Data: 1981–2010 climate normals at about 10 km resolution for all land. Temperature and precipitation: CHELSA V2.1 (CC0). Snow and dew point: ERA5-Land (Copernicus). Sunshine: CRU. Station records and extremes: NOAA GHCN-Daily. Towns: GeoNames (CC BY 4.0). Every number names its source and period; missing values are never filled in.
+
+## Main pages
+
+- [Interactive climate map and globe](https://climaclue.com/): the app.
+- [Climate map of the world](https://climaclue.com/climate-map/): what the map shows and how to use it.
+- [Weather by month for 5,800+ towns](https://climaclue.com/climate/): one page per town and per town-month, by country.
+- [Climate types explained](https://climaclue.com/climate-type/): the Köppen–Geiger climate types with example towns.
+- [Compare the climate of two cities](https://climaclue.com/compare/)
+- [Climate Matchmaker](https://climaclue.com/climate-matchmaker/): find towns whose climate matches what you want.
+- [City climate rankings](https://climaclue.com/rankings/): warmest, coldest, sunniest, wettest, driest and snowiest cities by country.
+- [Climate and weather quiz games](https://climaclue.com/games/)
+- [About and sources](https://climaclue.com/about/)
+
+## Notes
+
+- Values are long-term averages (climate), not forecasts or live weather.
+- Free to use; a membership ($2.50 a month or $12 a year) adds own questions to the built-in guide and unlimited game rounds.
+- Contact: contact@climaclue.com
