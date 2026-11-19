@@ -29086,7 +29086,7 @@ function createBilling(opts) {
 * ClimaClue chat service (runs on the Hetzner server behind Caddy at /api/*, port 127.0.0.1:8090).
 * Holds the Anthropic key (ANTHROPIC_API_KEY from /etc/climaclue/api.env), answers questions with
 * Claude Sonnet 5.5 grounded in the site's own data files, and enforces:
-*  - a monthly spending cap (CLIMACLUE_MONTHLY_CAP_USD, default 30) tracked from token usage;
+*  - a monthly spending cap (CLIMACLUE_MONTHLY_CAP_USD, default 50, raised to $1.50 per paying member) tracked from token usage;
 *  - a per-visitor daily limit on new answers (CLIMACLUE_DAILY_PER_VISITOR, default 15);
 *  - stored answers for suggested questions (served free, never counted against limits).
 * Visitor addresses are only kept in memory to count today's questions; questions are not logged.
@@ -29110,7 +29110,8 @@ var PRICE_CACHE_READ = .1;
 var PRICE_CACHE_WRITE = 2.5;
 var DATA = process.env.CLIMACLUE_DATA ?? "/srv/climaclue/public";
 var STATE = process.env.STATE_DIRECTORY ?? "/var/lib/climaclue-api";
-var CAP = Number(process.env.CLIMACLUE_MONTHLY_CAP_USD ?? 30);
+var CAP = Number(process.env.CLIMACLUE_MONTHLY_CAP_USD ?? 50);
+var CAP_PER_MEMBER = Number(process.env.CLIMACLUE_CAP_PER_MEMBER_USD ?? 1.5);
 var PER_VISITOR = Number(process.env.CLIMACLUE_DAILY_PER_VISITOR ?? 15);
 var MEMBERSHIP = process.env.CLIMACLUE_MEMBERSHIP === "on";
 var TABS = [
@@ -29176,7 +29177,19 @@ var addSpend = (usd) => {
 	spend.answers++;
 	writeFileSync(spendFile, JSON.stringify(spend));
 };
-var overCap = () => spend.month === month() && spend.usd >= CAP;
+var memberCount = {
+	at: 0,
+	n: 0
+};
+var members = () => {
+	if (Date.now() - memberCount.at > 6e5) memberCount = {
+		at: Date.now(),
+		n: accounts.store.listUsers().filter((u) => isMember(u)).length
+	};
+	return memberCount.n;
+};
+var monthlyCap = () => Math.max(CAP, members() * CAP_PER_MEMBER);
+var overCap = () => spend.month === month() && spend.usd >= monthlyCap();
 var storeFile = `${STATE}/answers.jsonl`;
 var stored = /* @__PURE__ */ new Map();
 if (existsSync(storeFile)) for (const line of readFileSync(storeFile, "utf8").split("\n")) {
