@@ -28678,7 +28678,8 @@ function createAccounts(opts) {
 					send$1(res, 400, { error: "places must be a list" });
 					return true;
 				}
-				send$1(res, 200, { places: store.setPlaces(user.id, body.places) });
+				const limit = Math.max(opts.placesLimit ? opts.placesLimit(user) : 200, store.getPlaces(user.id).length);
+				send$1(res, 200, { places: store.setPlaces(user.id, body.places.slice(0, limit)) });
 				return true;
 			}
 			send$1(res, 405, { error: "Method not allowed" });
@@ -29129,6 +29130,7 @@ var accounts = createAccounts({
 	clientId: (process.env.CLIMACLUE_GOOGLE_CLIENT_ID ?? "").trim(),
 	stateDir: STATE,
 	allowedOrigins: (process.env.CLIMACLUE_ORIGINS ?? "https://climaclue.com,https://www.climaclue.com").split(",").map((s) => s.trim()).filter(Boolean),
+	placesLimit: (u) => !MEMBERSHIP || isMember(u) ? 50 : 5,
 	config: (u) => billing?.config(u) ?? { billingOpen: false },
 	me: (u) => billing?.me(u) ?? {}
 });
