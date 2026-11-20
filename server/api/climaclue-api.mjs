@@ -26865,6 +26865,21 @@ var decode = {
 	sf: (v) => v * .1,
 	sde: (v) => v * .1
 };
+/**
+* Relative humidity is calculated here, not taken from the tiles' own `hurs` values. CHELSA V2.1's published
+* humidity, decoded exactly as its metadata says (percent, scale 0.01), covers only about half the real range:
+* against NOAA station humidity for 120 US cities it averages 9 points too low, and worldwide it sits 10+ points
+* below the value implied by the same area's dew point and temperature in two town-months out of three
+* (docs/research/HUMIDITY_CHECK.md). The calculated value is the mean of the humidity at the month's average
+* night low and at its average day high, for the month's average dew point (saturation over water, Magnus
+* formula with the Alduchov & Eskridge 1996 coefficients), each capped at 100%.
+*/
+var saturation = (c) => 6.1094 * Math.exp(17.625 * c / (c + 243.04));
+function calculatedHumidity(dewPoint, nightLow, dayHigh) {
+	if (dewPoint === null || nightLow === null || dayHigh === null) return null;
+	const vapour = saturation(dewPoint), at = (c) => Math.min(100, 100 * vapour / saturation(c));
+	return Number(((at(nightLow) + at(dayHigh)) / 2).toFixed(2));
+}
 /** Fixed grid of the published tiles (checked against index.json when it loads). */
 var SQUARE_GRID = {
 	origin_lon: -180.00013888885002,
@@ -26959,6 +26974,11 @@ function decodeSquare(index, tile, row, col) {
 		}
 		layers[layer] = series;
 	});
+	layers.hurs = {
+		mean: layers.d2m.mean.map((dew, m) => calculatedHumidity(dew, layers.tasmin.mean[m], layers.tasmax.mean[m])),
+		min: Array(12).fill(null),
+		max: Array(12).fill(null)
+	};
 	const geometry = squareGeometry(index, row, col);
 	return {
 		id: `sq-${row}-${col}`,
@@ -27029,7 +27049,7 @@ async function squareAt(coordinates, fetcher = fetch) {
 		};
 	}
 }
-var DAYS = [
+var DAYS$1 = [
 	31,
 	28 + 7 / 30,
 	31,
@@ -27047,7 +27067,7 @@ var DAYS = [
 function squareAnnualMean(square) {
 	const t = square.layers.tas.mean;
 	if (t.some((v) => v === null)) return null;
-	return t.reduce((sum, v, i) => sum + v * DAYS[i], 0) / DAYS.reduce((a, b) => a + b, 0);
+	return t.reduce((sum, v, i) => sum + v * DAYS$1[i], 0) / DAYS$1.reduce((a, b) => a + b, 0);
 }
 // src/koppen.ts
 var koppenNames = {
@@ -27382,11 +27402,109 @@ function nearestSnowRecord(data, at, maxKm = 75) {
 		nearby
 	};
 }
+// src/town-values.ts
+/** One row per town: [name, country, lon, lat, tas×12, tasmin×12, tasmax×12, pr×12, sfcWind×12, hurs×12, areaYear]. */
+var TOWN_VALUE_FIELDS = [
+	"n",
+	"c",
+	"x",
+	"y",
+	"tas",
+	"tasmin",
+	"tasmax",
+	"pr",
+	"sfcWind",
+	"hurs",
+	"areaYear"
+];
+var TownValuesIndex = class {
+	grid = /* @__PURE__ */ new Map();
+	constructor(file) {
+		if (JSON.stringify(file.fields) !== JSON.stringify(TOWN_VALUE_FIELDS)) throw new Error("Unexpected town-values format");
+		for (const r of file.towns) {
+			const t = Object.fromEntries(TOWN_VALUE_FIELDS.map((f, i) => [f, r[i]])), k = this.key(t.x, t.y);
+			const l = this.grid.get(k);
+			if (l) l.push(t);
+			else this.grid.set(k, [t]);
+		}
+	}
+	key(lon, lat) {
+		return `${Math.floor(lon * 10)},${Math.floor(lat * 10)}`;
+	}
+	/** The listed town at this spot: its centre within 1.5 km (a town picked from search or a town page sits exactly on it). */
+	at(lon, lat) {
+		let best = null, bestKm = 1.5;
+		const k = Math.cos(lat * Math.PI / 180);
+		for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const t of this.grid.get(this.key(lon + a / 10, lat + b / 10)) ?? []) {
+			const km = 111.2 * Math.hypot((t.x - lon) * k, t.y - lat);
+			if (km <= bestKm) {
+				bestKm = km;
+				best = t;
+			}
+		}
+		return best;
+	}
+};
+// api/town-values.ts
+/**
+* Town values for the chat (20 November 2026). Town pages describe each town by its own ~3 km (scripts/town-points.mts);
+* the globe and the chat's area data describe the 0.1° (~10 km) area around it. In steep terrain the two differ by
+* several degrees (Medellín 20.0 °C a year, its area 17.7). So when the chat is about a listed town, its DATA also
+* carries the town's own values, the numbers the town page shows.
+*
+* Input: /climate/town-values.json in the published site, written by the site build (scripts/seo/pages.ts) from
+* data/seo/towns.json, so it always matches the town pages. It lists only towns whose own values differ from their
+* area's (src/town-values.ts townDiffers); elsewhere the area data already describes the town.
+*/
+function loadTownValues(data) {
+	try {
+		return new TownValuesIndex(JSON.parse(readFileSync(`${data}/site/climate/town-values.json`, "utf8")));
+	} catch {
+		return null;
+	}
+}
+var r1$1 = (v) => v === null ? null : Math.round(v * 10) / 10;
+var DAYS = [
+	31,
+	28 + 7 / 30,
+	31,
+	30,
+	31,
+	30,
+	31,
+	31,
+	30,
+	31,
+	30,
+	31
+];
+var yearMean = (s) => s.some((v) => v === null) ? null : r1$1(s.reduce((a, v, i) => a + v * DAYS[i], 0) / DAYS.reduce((a, b) => a + b, 0));
+/** The town_itself block of the chat's DATA. */
+function townContext(t) {
+	const type = t.tas.every((v) => v !== null) && t.pr.every((v) => v !== null) ? koppen(t.tas, t.pr, t.y) : null;
+	const year = yearMean(t.tas);
+	return {
+		town: `${t.n}, ${t.c}`,
+		what: "Values for the town itself (the ~3 x 3 km around its centre), as on ClimaClue's town page. The rest of DATA describes the 0.1 degree area around it, which the globe shows; sunshine, dew point and snow exist only for that area.",
+		annual_mean_temp_C: year,
+		area_annual_mean_temp_C: r1$1(t.areaYear),
+		climate_type: type ? `${type.name} (Koppen ${type.code})` : null,
+		yearly_precip_mm: t.pr.every((v) => v !== null) ? Math.round(t.pr.reduce((a, b) => a + b, 0)) : null,
+		monthly_Jan_to_Dec: {
+			mean_temp_C: t.tas.map(r1$1),
+			avg_night_low_C: t.tasmin.map(r1$1),
+			avg_day_high_C: t.tasmax.map(r1$1),
+			precip_mm: t.pr.map(r1$1),
+			wind_m_s: t.sfcWind.map(r1$1),
+			relative_humidity_pct: t.hurs.map(r1$1)
+		}
+	};
+}
 // api/context.ts
 /** The data ClimaClue's answers are grounded in: one place's real values from the site's own files. */
 var r1 = (v) => v === null ? null : Math.round(v * 10) / 10;
 var total = (v) => v.every((x) => x !== null) ? Math.round(v.reduce((a, b) => a + b, 0)) : null;
-function placeContext(name, square, stations, snowStations = null) {
+function placeContext(name, square, stations, snowStations = null, town = null) {
 	const L = square.layers, lat = (square.bounds[1] + square.bounds[3]) / 2, lon = (square.bounds[0] + square.bounds[2]) / 2;
 	const type = koppen(L.tas.mean, L.pr.mean, lat);
 	const hi = stations ? nearestRecord(stations, [lon, lat], "high", 200) : null, lo = stations ? nearestRecord(stations, [lon, lat], "low", 200) : null;
@@ -27432,12 +27550,13 @@ function placeContext(name, square, stations, snowStations = null) {
 			square.snowFallbackKm ? `snow taken from the nearest land cell ${square.snowFallbackKm} km away` : null,
 			lat < -60 ? "Antarctica: very few weather stations, values are model estimates" : null
 		].filter(Boolean),
+		...town ? { town_itself: townContext(town) } : {},
 		station_records: {
 			high: rec(hi),
 			low: rec(lo)
 		},
 		station_snow_records: snowRecord(snowStations, [lon, lat]),
-		sources: "CHELSA V2.1 1981-2010 (temperature, precipitation, wind, humidity, cloud); ERA5-Land dew point, snowfall (matched to each area's CHELSA climate) and snow depth 1981-2010; CRU CL 2.0 sunshine about 1961-1990; NOAA GHCN-Daily station records"
+		sources: "CHELSA V2.1 1981-2010 (temperature, precipitation, wind, cloud); ERA5-Land dew point, snowfall (matched to each area's CHELSA climate) and snow depth 1981-2010; relative humidity calculated by ClimaClue from the ERA5-Land dew point and CHELSA night lows and day highs (an estimate); CRU CL 2.0 sunshine about 1961-1990; NOAA GHCN-Daily station records"
 	};
 }
 var SYSTEM = `You are ClimaClue, the friendly guide on climaclue.com, a globe where people explore the climate of any place on Earth.
@@ -27448,6 +27567,7 @@ When the visitor asks to compare two places (or this place with another): look u
 Explain causes with real geography (ocean currents, prevailing winds, mountains, latitude, distance from the sea, elevation), specific to each place rather than generic to its climate type. If a cause is not shown by the data, present it as the usual explanation ("This is mainly because…") without overstating certainty.
 If the question is not about climate, weather, geography or this site, politely steer back to the place. If even the tools cannot answer it, say so briefly.
 Talk about the climate, not about ClimaClue: do not describe how the site processes, adjusts or caps its data, or which models it uses, unless the visitor asks how the numbers are made. For questions like "has it ever snowed here?", use station_snow_records (measured snowfall at the nearest weather station) and give its dates; averages of zero do not mean it never happened.
+When DATA (or a place_climate result) has town_itself, the place is a listed town: town_itself holds the numbers for the town itself, the ones its ClimaClue town page shows. Use them for the town's temperature, rain, wind, humidity and climate type. The rest of DATA describes the surrounding 0.1 degree area shown on the globe; in hills or mountains it can be several degrees cooler. Mention that only if the two differ noticeably and it matters to the question, or the visitor asks why the numbers differ.
 Text written between tool calls is not shown to the visitor: make all your lookups first, then put the complete answer in your final message.`;
 /** Measured snowfall at the nearest station with a snowfall record (cm of new snow). */
 function snowRecord(data, at) {
@@ -27568,6 +27688,8 @@ var placeLabel = (p) => p.country && p.country !== p.name ? `${p.name}, ${p.coun
 * measure, and a comparison proposal that the visitor approves or declines in the chat.
 */
 var towns = null;
+/** The town's own values where they differ from its area's (the file holds only those towns; src/town-values.ts). */
+var townOf = (env, lon, lat, _s) => env.townValues?.at(lon, lat) ?? null;
 var townsOf = (env) => towns ??= new PlacesIndex(JSON.parse(readFileSync(`${env.data}/site/places/places-v1.json`, "utf8")));
 var grids = /* @__PURE__ */ new Map();
 var mapsIndex = null;
@@ -27878,7 +28000,7 @@ async function runTool(env, name, input) {
 				longitude: lon,
 				population: p.population,
 				other_matches: hits.slice(1).map(placeLabel),
-				data: placeContext(placeLabel(p), s, env.stations, env.snowStations ?? null)
+				data: placeContext(placeLabel(p), s, env.stations, env.snowStations ?? null, townOf(env, lon, lat, s))
 			}) };
 		}
 		if (name === "point_climate") {
@@ -29249,6 +29371,10 @@ var snowStations = null;
 try {
 	snowStations = JSON.parse(readFileSync(`${DATA}/squares/snow-stations-v1.json`, "utf8"));
 } catch {}
+var townValues = loadTownValues(DATA);
+var townId = (t) => `${t.n}|${t.c}|${t.x}|${t.y}`;
+/** The listed town at this spot, when its own values differ from the area's (the file holds only those towns). */
+var townAt = (lon, lat, square) => square ? townValues?.at(lon, lat) ?? null : null;
 var spendFile = `${STATE}/spend.json`;
 var month = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 7);
 var spend = existsSync(spendFile) ? JSON.parse(readFileSync(spendFile, "utf8")) : {
@@ -29310,7 +29436,8 @@ var snowRevised = /* @__PURE__ */ new Set();
 try {
 	snowRevised = new Set(JSON.parse(readFileSync(`${DATA}/squares/snow-revised-2026-11-19.json`, "utf8")).squares);
 } catch {}
-var answerKey = (squareId, tab, suggestionId, revised = snowRevised) => `v2|${squareId}|${tab}|${suggestionId}${(tab === "snow" || tab === "climate") && revised.has(squareId) ? "|snow2" : ""}`;
+var answerKey = (squareId, tab, suggestionId, revised = snowRevised) => `v2|${squareId}|${tab}|${suggestionId}${(tab === "snow" || tab === "climate") && revised.has(squareId) ? "|snow2" : ""}${tab === "humidity" ? "|hum2" : ""}`;
+var townAnswerKey = (town, tab, suggestionId) => `v3|town|${townId(town)}|${tab}|${suggestionId}`;
 var visitors = /* @__PURE__ */ new Map();
 var allow = (ip) => {
 	const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), v = visitors.get(ip);
@@ -29352,7 +29479,7 @@ function nearTown(lon, lat) {
 }
 async function answer(places, question, tab, history, imperial = false) {
 	const data = places.map((p) => {
-		const ctx = placeContext(p.name, p.square, stations, snowStations);
+		const ctx = placeContext(p.name, p.square, stations, snowStations, p.town ?? null);
 		if (tab !== "trip") return ctx;
 		const [w, s, e, n] = p.square.bounds;
 		return {
@@ -29412,7 +29539,8 @@ async function answer(places, question, tab, history, imperial = false) {
 				data: DATA,
 				fetcher: fileFetcher,
 				stations,
-				snowStations
+				snowStations,
+				townValues
 			}, c.name, c.input ?? {});
 			if (out.proposal) proposal = out.proposal;
 			if (out.explore) explore = out.explore;
@@ -29474,10 +29602,14 @@ async function handle(req, res) {
 		a: h.a.slice(0, 1200)
 	}));
 	if (!question || !places.length) return json(res, 400, { error: "A question and a place are needed" });
-	const ok = (await Promise.all(places.map(async (p) => ({
-		name: p.name,
-		square: await load(p)
-	})))).filter((p) => !!p.square);
+	const ok = (await Promise.all(places.map(async (p) => {
+		const square = await load(p);
+		return {
+			name: p.name,
+			square,
+			town: townAt(p.lon, p.lat, square)
+		};
+	}))).filter((p) => !!p.square);
 	if (!ok.length) return json(res, 422, { error: "No climate data for that place" });
 	const user = accounts.userFor(req), member = isMember(user);
 	const town = places[0].name.split(",")[0], other = places[1]?.name.split(",")[0] ?? null;
@@ -29489,7 +29621,7 @@ async function handle(req, res) {
 		if (!suggested) return json(res, 403, { error: "Asking your own questions is for members. The suggested questions are free." });
 	}
 	const imperial = body.units === "imperial";
-	const key = suggested && tab !== "trip" && ok.length === 1 && !history.length ? `${answerKey(ok[0].square.id, tab, body.suggestionId)}${imperial ? "|imperial" : ""}` : null;
+	const key = suggested && tab !== "trip" && ok.length === 1 && !history.length ? `${ok[0].town ? townAnswerKey(ok[0].town, tab, body.suggestionId) : answerKey(ok[0].square.id, tab, body.suggestionId)}${imperial ? "|imperial" : ""}` : null;
 	if (key && stored.has(key)) return json(res, 200, {
 		answer: stored.get(key),
 		stored: true
@@ -29539,9 +29671,9 @@ async function prewarm(n, perTab) {
 		const square = await load(p);
 		if (!square) continue;
 		seen.add(id);
-		const data = placeContext(p.name, square, stations, snowStations);
+		const town = townAt(p.lon, p.lat, square), data = placeContext(p.name, square, stations, snowStations, town);
 		for (const tab of TABS) for (const s of suggestQuestions(square, tab, towns.n[i]).slice(0, perTab)) {
-			const key = answerKey(square.id, tab, s.id);
+			const key = town ? townAnswerKey(town, tab, s.id) : answerKey(square.id, tab, s.id);
 			if (stored.has(key)) continue;
 			const custom_id = `q${requests.length}`;
 			keys.set(custom_id, key);
