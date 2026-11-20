@@ -26875,9 +26875,10 @@ var decode = {
 * formula with the Alduchov & Eskridge 1996 coefficients), each capped at 100%.
 */
 var saturation = (c) => 6.1094 * Math.exp(17.625 * c / (c + 243.04));
-function calculatedHumidity(dewPoint, nightLow, dayHigh) {
-	if (dewPoint === null || nightLow === null || dayHigh === null) return null;
+function calculatedHumidity(dewPoint, nightLow, dayHigh, mean = null) {
+	if (dewPoint === null) return null;
 	const vapour = saturation(dewPoint), at = (c) => Math.min(100, 100 * vapour / saturation(c));
+	if (nightLow === null || dayHigh === null) return mean === null ? null : Number(at(mean).toFixed(2));
 	return Number(((at(nightLow) + at(dayHigh)) / 2).toFixed(2));
 }
 /** Fixed grid of the published tiles (checked against index.json when it loads). */
@@ -26975,7 +26976,7 @@ function decodeSquare(index, tile, row, col) {
 		layers[layer] = series;
 	});
 	layers.hurs = {
-		mean: layers.d2m.mean.map((dew, m) => calculatedHumidity(dew, layers.tasmin.mean[m], layers.tasmax.mean[m])),
+		mean: layers.d2m.mean.map((dew, m) => calculatedHumidity(dew, layers.tasmin.mean[m], layers.tasmax.mean[m], layers.tas.mean[m])),
 		min: Array(12).fill(null),
 		max: Array(12).fill(null)
 	};
