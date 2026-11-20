@@ -29436,8 +29436,9 @@ var snowRevised = /* @__PURE__ */ new Set();
 try {
 	snowRevised = new Set(JSON.parse(readFileSync(`${DATA}/squares/snow-revised-2026-11-19.json`, "utf8")).squares);
 } catch {}
-var answerKey = (squareId, tab, suggestionId, revised = snowRevised) => `v2|${squareId}|${tab}|${suggestionId}${(tab === "snow" || tab === "climate") && revised.has(squareId) ? "|snow2" : ""}${tab === "humidity" ? "|hum2" : ""}`;
-var townAnswerKey = (town, tab, suggestionId) => `v3|town|${townId(town)}|${tab}|${suggestionId}`;
+var temprangeRevised = (tab) => tab === "temperature" || tab === "climate" || tab === "humidity" ? "|dtr1" : "";
+var answerKey = (squareId, tab, suggestionId, revised = snowRevised) => `v2|${squareId}|${tab}|${suggestionId}${(tab === "snow" || tab === "climate") && revised.has(squareId) ? "|snow2" : ""}${tab === "humidity" ? "|hum2" : ""}${temprangeRevised(tab)}`;
+var townAnswerKey = (town, tab, suggestionId) => `v3|town|${townId(town)}|${tab}|${suggestionId}${temprangeRevised(tab)}`;
 var visitors = /* @__PURE__ */ new Map();
 var allow = (ip) => {
 	const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), v = visitors.get(ip);
