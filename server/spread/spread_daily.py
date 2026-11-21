@@ -15,6 +15,8 @@ Writes data/results/spread/daily-mMM.npz per finished calendar month (resumable:
 deletes each download once it is folded in.
 """
 import concurrent.futures as cf
+import json
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -29,6 +31,17 @@ RAW = ROOT / 'data/raw/spread-daily'
 YEARS = list(range(1981, 2011, 3))
 STATS = {'mean': 'daily_mean', 'max': 'daily_maximum', 'min': 'daily_minimum'}
 DATASET = 'derived-era5-land-daily-statistics'
+# --publish-to DIR: after every folded file write DIR/status.json (progress), and copy each finished month there, so
+# progress and results can be fetched over the web (on the server: /srv/climaclue/public/squares/spread-daily-raw).
+PUBLISH = None
+
+
+def status(month, folded):
+    if not PUBLISH: return
+    PUBLISH.mkdir(parents=True, exist_ok=True)
+    done = sorted(int(p.stem[-2:]) for p in OUT.glob('daily-m??.npz'))
+    (PUBLISH / 'status.json').write_text(json.dumps({'months_done': done, 'working_on': month, 'files_folded': folded, 'of': 30,
+                                                     'updated': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}))
 
 
 def fetch(year, month, stat):
@@ -95,6 +108,7 @@ def do_month(month, workers):
             np.savez(str(part) + '.tmp.npz', done=np.array(sorted(done)), **{f'{s_}_{k}': acc[s_][k].astype(np.float32 if k in ('sd', 'sm', 'nd', 'ny') else np.float64) for s_ in STATS for k in keys})
             Path(str(part) + '.tmp.npz').replace(part)
             print(f'folded {path.name} ({len(done)}/30)', flush=True)
+            status(month, len(done))
     res = {}
     for s, A in acc.items():
         nd, ny = A['nd'], A['ny']
@@ -105,11 +119,13 @@ def do_month(month, workers):
     OUT.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out, **res, years=np.array(YEARS))
     part.unlink(missing_ok=True)
+    if PUBLISH: PUBLISH.mkdir(parents=True, exist_ok=True); shutil.copy(out, PUBLISH / out.name); status(month, 30)
     print('month done', month, flush=True)
 
 
 if __name__ == '__main__':
     args = sys.argv[1:]
     workers = int(args[args.index('--workers') + 1]) if '--workers' in args else 2
-    months = [int(a) for a in args if a.isdigit() and (a not in args or args[args.index(a) - 1] != '--workers')] or list(range(1, 13))
+    if '--publish-to' in args: PUBLISH = Path(args[args.index('--publish-to') + 1])
+    months = [int(a) for i, a in enumerate(args) if a.isdigit() and (i == 0 or args[i - 1] != '--workers')] or list(range(1, 13))
     for m in months: do_month(m, workers)

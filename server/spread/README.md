@@ -19,11 +19,12 @@ Run (survives logouts, restarts on failure, low priority):
 
     systemd-run --unit=climaclue-spread --property=Restart=on-failure --property=Nice=15 \
       --working-directory=/srv/climaclue/spread-work \
-      /srv/climaclue/spread-work/venv/bin/python scripts/spread_daily.py --workers 2
+      /srv/climaclue/spread-work/venv/bin/python scripts/spread_daily.py --workers 2 \
+      --publish-to /srv/climaclue/public/squares/spread-daily-raw
 
 Progress: `journalctl -u climaclue-spread -n 20` ("folded … (n/30)", "month done N").
 Results: `/srv/climaclue/spread-work/data/results/spread/daily-mMM.npz`, one per finished month.
 
-Hand-over: copy each finished month's file to `/srv/climaclue/public/squares/spread-daily-raw/` (web-reachable at
-https://climaclue.com/squares/spread-daily-raw/daily-mMM.npz) so the development session can fetch and publish them;
-delete that folder once it has. Disk: about 1 GB while running (downloads are deleted as soon as they are folded).
+Hand-over is automatic with `--publish-to`: progress at https://climaclue.com/squares/spread-daily-raw/status.json
+and each finished month at .../daily-mMM.npz, for the development session to fetch and publish. Delete that folder
+once it has. Disk: about 1 GB while running (downloads are deleted as soon as they are folded).
