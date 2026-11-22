@@ -36,6 +36,8 @@ tfoot th,tfoot td{font-weight:600;border-top:2px solid #e3d6c0}
 td small,.alt{color:#7a868b;font-size:13px}
 td small{display:block}
 .v{display:inline-block;min-width:3em;padding:1px 6px;border-radius:5px;text-align:center;font-weight:600;font-variant-numeric:tabular-nums;color:#1f2d33}.v.w{color:#fff}
+.where-c{display:block;font-weight:400;color:#7a868b;font-size:13px}
+.tag{display:inline-block;margin:2px 4px 0 0;padding:0 6px;border-radius:4px;background:#f1ece2;color:#6b5a48;font-size:12px;font-weight:600}
 .small{font-size:14px;color:#5d6a70}
 details{background:#fff;border:1px solid #eadfcb;border-radius:8px;padding:8px 14px;margin:8px 0}
 summary{font-weight:600;cursor:pointer}
