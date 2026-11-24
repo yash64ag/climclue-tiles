@@ -100,14 +100,14 @@ h2{font-size:32px;letter-spacing:-.6px;margin:64px 0 8px;text-align:center}h2+.s
 <h3 id="plan-monthly">Monthly</h3>
 <p class="price">$2.50<span> / month</span></p>
 <p class="per">Billed every month</p>
-<div class="action"><button class="btn" type="button" data-plan="monthly" aria-describedby="plan-monthly" disabled>Membership is coming soon</button></div>
+<div class="action"><button class="btn" type="button" data-plan="monthly" aria-describedby="plan-monthly" disabled>Loading…</button></div>
 </div>
 <div class="plan best">
 <span class="badge">Best value · save 60%</span>
 <h3 id="plan-yearly">Yearly</h3>
 <p class="price">$12<span> / year</span></p>
 <p class="per">Just <b>$1 a month</b>, billed yearly</p>
-<div class="action"><button class="btn" type="button" data-plan="yearly" aria-describedby="plan-yearly" disabled>Membership is coming soon</button></div>
+<div class="action"><button class="btn" type="button" data-plan="yearly" aria-describedby="plan-yearly" disabled>Loading…</button></div>
 </div>
 </section>
 <p class="fine">Prices in US dollars. Renews automatically until you cancel. Payments by Stripe: your card details never reach ClimaClue. See the <a href="/terms/">terms</a> and <a href="/refunds/">refund policy</a>.</p>
@@ -152,6 +152,7 @@ h2{font-size:32px;letter-spacing:-.6px;margin:64px 0 8px;text-align:center}h2+.s
   function json(url, init) { return fetch(url, init).then(function (r) { var ok = r.ok && (r.headers.get('content-type') || '').indexOf('application/json') >= 0; return ok ? r.json() : r.json().catch(function () { return {}; }).then(function (j) { throw new Error((j && j.error) || 'HTTP ' + r.status); }); }); }
   function post(url, body) { return json(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-climaclue': '1' }, body: JSON.stringify(body || {}) }); }
   function soon() { buttons.forEach(function (b) { b.disabled = true; b.textContent = 'Membership is coming soon'; }); }
+  function offline() { buttons.forEach(function (b) { b.disabled = true; b.textContent = 'Can’t load right now'; }); }
   function signInLinks() {
     buttons.forEach(function (b) {
       var a = document.createElement('a'); a.className = 'btn'; a.href = '/'; a.textContent = 'Sign in to join';
@@ -224,7 +225,7 @@ h2{font-size:32px;letter-spacing:-.6px;margin:64px 0 8px;text-align:center}h2+.s
         // Just paid: Stripe tells the server within seconds; look again a few times.
         if (status === 'success' && tries++ < 6) setTimeout(load, 2500);
       });
-    }).catch(function () { soon(); say('Membership is coming soon. Everything free on ClimaClue stays free.'); });
+    }).catch(function () { offline(); say('Membership couldn’t load just now. Refresh the page in a moment to join.', 'warn'); });
   }
   load();
   // Coming back with the Back button from Stripe restores the old page (buttons stuck on "Opening…"): reload it fresh.
