@@ -168,3 +168,4 @@ a.pin:hover{background:#efb875;color:#142d3a;z-index:3}
 .pills{list-style:none;margin:10px 0 18px;padding:0;display:flex;flex-wrap:wrap;gap:6px}
 .pills a{display:inline-block;padding:4px 11px;border-radius:999px;background:#fff;border:1px solid #eadfcb;font-size:14px;text-decoration:none}
 .pills a:hover{border-color:#e8833a;background:#fff4e2}
+.tag.swim-bathwarm{background:#c4481c;color:#fff}.tag.swim-warm{background:#ee9640;color:#1f2d33}.tag.swim-refreshing{background:#f7d68c;color:#1f2d33}.tag.swim-cold{background:#c4d4de;color:#1f2d33}
