@@ -27562,7 +27562,7 @@ function placeContext(name, square, stations, snowStations = null, town = null) 
 }
 var SYSTEM = `You are ClimaClue, the friendly guide on climaclue.com, a globe where people explore the climate of any place on Earth.
 Answer the visitor's question in plain English for a curious non-expert, in at most 120 words. Plain text only: no markdown, headings, bullet points or dashes at the start of lines; write in sentences. When listing places, name at most four, in one or two sentences.
-DATA holds the place the visitor is looking at. You can see the whole globe through your tools: place_climate (any town by name), point_climate (any latitude/longitude), similar_places (where else has this climate), extreme_places (the wettest, sunniest, coldest… towns of 100,000+ people), map_extremes (every land area on the globe, not just towns: "the whole map", "anywhere on Earth", or a region given as a latitude/longitude box). "This map" or "the whole map" means the whole globe. When your answer centres on one other place (one you found or the visitor asked about), call propose_explore so they can open it in Explore; when it compares two places, use propose_comparison instead. Whenever a question involves another place, a comparison, "where else" or a ranking, look it up with a tool before answering. Never say you only have data for this spot, and never tell the visitor to look something up themselves.
+DATA holds the place the visitor is looking at. You can see the whole globe through your tools: place_climate (any town by name), point_climate (any latitude/longitude), similar_places (where else has this climate), extreme_places (the towns of 100,000+ people highest or lowest in a measure), map_extremes (every land area on the globe, not just towns: "the whole map", "anywhere on Earth", or a region given as a latitude/longitude box). Both rank on every measure ClimaClue shows, including the seasonal range, day highs and night lows, dew point, sea temperature, snow, and the day-to-day and year-to-year spread (standard deviation); never say you can't rank a measure the site shows. "This map" or "the whole map" means the whole globe. When your answer centres on one other place (one you found or the visitor asked about), call propose_explore so they can open it in Explore; when it compares two places, use propose_comparison instead. Whenever a question involves another place, a comparison, "where else" or a ranking, look it up with a tool before answering. Never say you only have data for this spot, and never tell the visitor to look something up themselves.
 Every number you state must come from DATA or a tool result (say which month or measure). For yearly amounts use DATA's yearly_totals rather than adding months yourself. Never invent figures. If you compare or calculate, show the result briefly.
 When the visitor asks to compare two places (or this place with another): look up the other place with place_climate and call propose_comparison (so they can open both side by side), then, after all tool calls, write the comparison with real numbers from both places; the offer never replaces the answer. Mention the offer in one short closing sentence.
 Explain causes with real geography (ocean currents, prevailing winds, mountains, latitude, distance from the sea, elevation), specific to each place rather than generic to its climate type. If a cause is not shown by the data, present it as the usual explanation ("This is mainly because…") without overstating certainty.
@@ -27738,50 +27738,77 @@ var brief = (s) => {
 		yearly_snowfall_mm_water: sum(s.layers.sf.mean)
 	};
 };
-/** The exact yearly value of a measure from an area's full data (sums for amounts, averages otherwise). */
-function exactValue(s, layer) {
-	const key = {
-		temperature: "tas",
-		rain: "pr",
-		sunshine: "sun",
-		wind: "sfcWind",
-		humidity: "hurs",
-		snow: "sf"
-	}[layer];
-	const v = key ? s.layers[key].mean : null;
-	if (!v || !v.every((x) => x !== null)) return null;
-	const total = v.reduce((a, b) => a + b, 0);
-	return round1([
-		"rain",
-		"sunshine",
-		"snow"
-	].includes(layer) ? total : total / 12);
+var MEASURE_KEYS = [
+	"temperature",
+	"warmest_month",
+	"coldest_month",
+	"seasonal_range",
+	"day_high",
+	"night_low",
+	"day_night_range",
+	"hottest_month_high",
+	"coldest_month_low",
+	"rain",
+	"wettest_month",
+	"dry_months",
+	"sunshine",
+	"wind",
+	"humidity",
+	"dew_point",
+	"muggy_months",
+	"snow",
+	"snow_cover_months",
+	"sea_temperature",
+	"warmest_sea_month",
+	"day_to_day_spread",
+	"day_to_day_spread_highs",
+	"day_to_day_spread_lows",
+	"year_to_year_spread",
+	"year_to_year_spread_rain"
+];
+var MEASURE_HELP = "temperature = yearly average; warmest_month / coldest_month = average of that month; seasonal_range = warmest minus coldest month; day_high / night_low = yearly averages of daily highs and lows; day_night_range = average daily high minus low; hottest_month_high / coldest_month_low; rain = yearly precipitation; wettest_month; dry_months = months under 30 mm; sunshine = yearly hours; wind; humidity; dew_point; muggy_months = months with dew point 18 °C+; snow = yearly fresh snow (cm); snow_cover_months = months with snow on the ground; sea_temperature / warmest_sea_month (coastal areas only); day_to_day_spread (+ _highs, _lows) = standard deviation of daily temperatures within a month, averaged over the year (how much one day differs from the next); year_to_year_spread = standard deviation of a month's average temperature from year to year; year_to_year_spread_rain = how much a month's precipitation varies between years (% of its average).";
+var measures = null;
+function measuresOf(env) {
+	if (measures) return measures;
+	const dir = `${env.data}/squares/chat`;
+	if (!existsSync(`${dir}/measures.json`)) return null;
+	const j = JSON.parse(readFileSync(`${dir}/measures.json`, "utf8")), c = readFileSync(`${dir}/cells.bin`);
+	const cells = new Uint32Array(c.buffer.slice(c.byteOffset, c.byteOffset + c.byteLength));
+	return measures = {
+		dir,
+		meta: j.measures,
+		cells,
+		n: cells.length,
+		values: /* @__PURE__ */ new Map()
+	};
 }
-var MEASURES = {
-	temperature: {
-		layer: "temperature",
-		label: "annual mean temperature (°C)"
-	},
-	rain: {
-		layer: "rain",
-		label: "yearly precipitation (mm)"
-	},
-	sunshine: {
-		layer: "sunshine",
-		label: "yearly sunshine (hours)"
-	},
-	wind: {
-		layer: "wind",
-		label: "mean wind (m/s)"
-	},
-	humidity: {
-		layer: "humidity",
-		label: "mean relative humidity (%)"
-	},
-	snow: {
-		layer: "snow",
-		label: "yearly snowfall (mm water)"
+/** One measure's values for every land cell (values/<key>.bin), loaded on first use. */
+function valuesOf(M, m) {
+	let v = M.values.get(m);
+	if (!v) {
+		const b = readFileSync(`${M.dir}/values/${M.meta[m].key}.bin`);
+		v = new Int16Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+		M.values.set(m, v);
 	}
+	return v;
+}
+/** Index of the land area holding a point (cells are sorted), or -1. */
+function cellIndex(M, lon, lat) {
+	const r = Math.floor((84 - lat) / .1), c = Math.floor((lon + 180) / .1);
+	if (r < 0 || r >= 1740 || c < 0 || c >= 3600) return -1;
+	const want = r * 3600 + c;
+	let lo = 0, hi = M.n - 1;
+	while (lo <= hi) {
+		const mid = lo + hi >> 1, x = M.cells[mid];
+		if (x === want) return mid;
+		if (x < want) lo = mid + 1;
+		else hi = mid - 1;
+	}
+	return -1;
+}
+var measureValue = (M, m, i) => {
+	const v = valuesOf(M, m)[i];
+	return v === -32768 ? null : Math.round(v * M.meta[m].scale * 100) / 100;
 };
 var TOOLS = [
 	{
@@ -27850,13 +27877,14 @@ var TOOLS = [
 	{
 		name: "extreme_places",
 		strict: true,
-		description: "The largest towns (over 100,000 people) with the highest or lowest value of a measure, worldwide or in one country. Use for \"where is the wettest/sunniest/coldest…\".",
+		description: "The largest towns (over 100,000 people) with the highest or lowest value of any measure ClimaClue shows (temperatures, rain, sunshine, wind, humidity, dew point, snow, sea temperature, day-to-day and year-to-year spread / standard deviation…), worldwide or in one country. Use for \"which city is the wettest / steadiest / most variable…\".",
 		input_schema: {
 			type: "object",
 			properties: {
 				measure: {
 					type: "string",
-					enum: Object.keys(MEASURES)
+					enum: [...MEASURE_KEYS],
+					description: MEASURE_HELP
 				},
 				direction: {
 					type: "string",
@@ -27883,13 +27911,14 @@ var TOOLS = [
 	{
 		name: "map_extremes",
 		strict: true,
-		description: "Search EVERY land area on the globe (about 2 million 0.1° areas, not just towns) for the highest or lowest yearly value of a measure, optionally inside a latitude/longitude box (e.g. a continent or region). Returns distinct spots at least 300 km apart with their exact values and nearest town. Use for \"where on the whole map / anywhere on Earth is the driest, coldest, sunniest…\". Use extreme_places instead when the visitor asks about towns or cities.",
+		description: "Search EVERY land area on the globe (about 2 million 0.1° areas, not just towns) for the highest or lowest yearly value of any measure ClimaClue shows (including day-to-day and year-to-year spread / standard deviation, sea temperature, dew point, seasonal range…), optionally inside a latitude/longitude box (e.g. a continent or region). Returns distinct spots at least 300 km apart with their exact values and nearest town. Use for \"where on the whole map / anywhere on Earth is the driest, coldest, sunniest…\". Use extreme_places instead when the visitor asks about towns or cities.",
 		input_schema: {
 			type: "object",
 			properties: {
 				measure: {
 					type: "string",
-					enum: Object.keys(MEASURES)
+					enum: [...MEASURE_KEYS],
+					description: MEASURE_HELP
 				},
 				direction: {
 					type: "string",
@@ -28076,129 +28105,91 @@ async function runTool(env, name, input) {
 				results
 			}) };
 		}
-		if (name === "extreme_places") {
-			const m = MEASURES[String(input.measure)];
-			if (!m) return {
+		if (name === "extreme_places" || name === "map_extremes") {
+			const M = measuresOf(env), m = M ? M.meta.findIndex((x) => x.key === String(input.measure)) : -1;
+			if (!M) return {
+				content: ok(fail("Worldwide rankings are unavailable right now.")),
+				isError: true
+			};
+			if (m < 0) return {
 				content: ok(fail("Unknown measure.")),
 				isError: true
 			};
-			const g = grid(env, m.layer);
-			if (!g) return {
-				content: ok(fail("That measure is unavailable right now.")),
-				isError: true
+			const meta = M.meta[m], high = input.direction !== "lowest", count = clampCount(input.count);
+			const about = {
+				measure: meta.label,
+				unit: meta.unit,
+				how_calculated: meta.how,
+				direction: high ? "highest" : "lowest"
 			};
-			const high = input.direction !== "lowest", count = clampCount(input.count), country = String(input.country ?? ""), idx = townsOf(env);
-			const rows = [];
-			for (let i = 0; i < idx.length; i++) {
-				const p = idx.place(i);
-				if (p.population < 1e5) continue;
-				if (!matchCountry(p, country)) continue;
-				const v = cellValue(g, ...p.coordinates);
-				if (v !== null) rows.push({
-					p,
-					v
-				});
-			}
-			rows.sort((a, b) => high ? b.v - a.v : a.v - b.v);
-			const results = [];
-			for (const { p } of rows.slice(0, count)) {
-				const s = await squareFor(env, ...p.coordinates);
-				if (s) results.push({
-					place: placeLabel(p),
-					latitude: p.coordinates[1],
-					longitude: p.coordinates[0],
-					population: p.population,
-					...brief(s)
-				});
-			}
-			return { content: ok({
-				measure: m.label,
-				direction: high ? "highest" : "lowest",
-				among: `${rows.length} towns over 100,000 people${country ? ` in ${country}` : " worldwide"}`,
-				results
-			}) };
-		}
-		if (name === "map_extremes") {
-			const m = MEASURES[String(input.measure)];
-			if (!m) return {
-				content: ok(fail("Unknown measure.")),
-				isError: true
-			};
-			const g = grid(env, m.layer);
-			if (!g) return {
-				content: ok(fail("That measure is unavailable right now.")),
-				isError: true
-			};
-			const high = input.direction !== "lowest", count = clampCount(input.count);
-			const S = num$1(input.south, -90, 90) ? input.south : -90, N = num$1(input.north, -90, 90) ? input.north : 90;
-			const W = num$1(input.west, -180, 180) ? input.west : -180, E = num$1(input.east, -180, 180) ? input.east : 180;
-			const inLon = (lon) => W <= E ? lon >= W && lon <= E : lon >= W || lon <= E;
-			const hist = /* @__PURE__ */ new Uint32Array(256), cellLon = (c) => GRID.lon0 + (c + .5) * GRID.cell, cellLat = (r) => GRID.lat0 - (r + .5) * GRID.cell;
-			let land = 0;
-			for (let r = 0; r < g.rows; r++) {
-				const lat = cellLat(r);
-				if (lat < S || lat > N) continue;
-				for (let c = 0; c < g.cols; c++) {
-					const v = g.bytes[r * g.cols + c];
-					if (v && inLon(cellLon(c))) {
-						hist[v]++;
-						land++;
-					}
-				}
-			}
-			if (!land) return {
-				content: ok(fail("No land in that box.")),
-				isError: true
-			};
-			let cut = high ? 255 : 1, kept = hist[cut];
-			while (kept < 3e3 && (high ? cut > 1 : cut < 255)) {
-				cut += high ? -1 : 1;
-				kept += hist[cut];
-			}
-			const cands = [];
-			for (let r = 0; r < g.rows; r++) {
-				const lat = cellLat(r);
-				if (lat < S || lat > N) continue;
-				for (let c = 0; c < g.cols; c++) {
-					const v = g.bytes[r * g.cols + c], lon = cellLon(c);
-					if (v && (high ? v >= cut : v <= cut) && inLon(lon)) cands.push({
-						lon,
-						lat,
+			if (name === "extreme_places") {
+				const country = String(input.country ?? ""), idx = townsOf(env), rows = [];
+				for (let i = 0; i < idx.length; i++) {
+					const p = idx.place(i);
+					if (p.population < 1e5 || !matchCountry(p, country)) continue;
+					const k = cellIndex(M, ...p.coordinates), v = k < 0 ? null : measureValue(M, m, k);
+					if (v !== null) rows.push({
+						p,
 						v
 					});
 				}
+				rows.sort((a, b) => high ? b.v - a.v : a.v - b.v);
+				const results = [];
+				for (const { p, v } of rows.slice(0, count)) {
+					const s = await squareFor(env, ...p.coordinates);
+					results.push({
+						place: placeLabel(p),
+						latitude: p.coordinates[1],
+						longitude: p.coordinates[0],
+						population: p.population,
+						value: v,
+						...s ? brief(s) : {}
+					});
+				}
+				return { content: ok({
+					...about,
+					among: `${rows.length} towns over 100,000 people${country ? ` in ${country}` : " worldwide"} (value of the 10 km area around each town)`,
+					results
+				}) };
 			}
-			cands.sort((a, b) => high ? b.v - a.v : a.v - b.v);
+			const S = num$1(input.south, -90, 90) ? input.south : -90, N = num$1(input.north, -90, 90) ? input.north : 90;
+			const W = num$1(input.west, -180, 180) ? input.west : -180, E = num$1(input.east, -180, 180) ? input.east : 180;
+			const inLon = (lon) => W <= E ? lon >= W && lon <= E : lon >= W || lon <= E;
+			const V = valuesOf(M, m), inBox = [];
+			for (let i = 0; i < M.n; i++) {
+				if (V[i] === -32768) continue;
+				const cell = M.cells[i], lat = 84 - (Math.floor(cell / 3600) + .5) * .1, lon = -180 + (cell % 3600 + .5) * .1;
+				if (lat >= S && lat <= N && inLon(lon)) inBox.push(i);
+			}
+			if (!inBox.length) return {
+				content: ok(fail("No land area with this measure in that box.")),
+				isError: true
+			};
+			inBox.sort((a, b) => high ? V[b] - V[a] : V[a] - V[b]);
 			const spots = [];
-			for (const c of cands) {
-				if (spots.length >= 24) break;
-				if (spots.every((s2) => haversineKm([s2.lon, s2.lat], [c.lon, c.lat]) >= 300)) spots.push(c);
-			}
-			const found = [];
-			for (const sp of spots) {
-				const s2 = await squareFor(env, sp.lon, sp.lat);
-				const v = s2 ? exactValue(s2, m.layer) : null;
-				if (s2 && v !== null) found.push({
-					...sp,
-					value: v,
-					s: s2
+			for (const i of inBox) {
+				if (spots.length >= count) break;
+				const cell = M.cells[i], lat = 84 - (Math.floor(cell / 3600) + .5) * .1, lon = -180 + (cell % 3600 + .5) * .1;
+				if (spots.every((s2) => haversineKm([s2.lon, s2.lat], [lon, lat]) >= 300)) spots.push({
+					lon,
+					lat,
+					i
 				});
 			}
-			found.sort((a, b) => high ? b.value - a.value : a.value - b.value);
-			const results = found.slice(0, count).map((f) => {
-				const near = townsOf(env).nearest([f.lon, f.lat], 1)[0];
-				return {
-					latitude: round1(f.lat),
-					longitude: round1(f.lon),
-					value: f.value,
+			const results = [];
+			for (const sp of spots) {
+				const near = townsOf(env).nearest([sp.lon, sp.lat], 1)[0], s2 = await squareFor(env, sp.lon, sp.lat);
+				results.push({
+					latitude: round1(sp.lat),
+					longitude: round1(sp.lon),
+					value: measureValue(M, m, sp.i),
 					nearest_town: near ? `${placeLabel(near)}, ${Math.round(near.km)} km away` : null,
-					...brief(f.s)
-				};
-			});
+					...s2 ? brief(s2) : {}
+				});
+			}
 			return { content: ok({
-				measure: m.label,
-				direction: high ? "highest" : "lowest",
-				searched: `all ${land.toLocaleString("en")} land areas${S > -90 || N < 90 || W > -180 || E < 180 ? " in the box" : " on the globe"}`,
+				...about,
+				searched: `all ${inBox.length.toLocaleString("en")} land areas with this measure${S > -90 || N < 90 || W > -180 || E < 180 ? " in the box" : " on the globe"}`,
 				results
 			}) };
 		}

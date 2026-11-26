@@ -1,0 +1,222 @@
+{
+ "grid": {
+  "rows": 1740,
+  "cols": 3600,
+  "top_lat": 84.0,
+  "left_lon": -180.0,
+  "step": 0.1
+ },
+ "cells": 2193541,
+ "missing": -32768,
+ "measures": [
+  {
+   "key": "temperature",
+   "label": "average temperature over the year",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "mean of the 12 monthly mean temperatures (day and night)",
+   "areas_with_value": 2193541
+  },
+  {
+   "key": "warmest_month",
+   "label": "average temperature of the warmest month",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "highest of the 12 monthly means",
+   "areas_with_value": 2193541
+  },
+  {
+   "key": "coldest_month",
+   "label": "average temperature of the coldest month",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "lowest of the 12 monthly means",
+   "areas_with_value": 2193541
+  },
+  {
+   "key": "seasonal_range",
+   "label": "gap between the warmest and coldest month",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "warmest monthly mean minus coldest monthly mean",
+   "areas_with_value": 2193541
+  },
+  {
+   "key": "day_high",
+   "label": "average day high over the year",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "mean of the 12 monthly average daily maximums",
+   "areas_with_value": 1581282
+  },
+  {
+   "key": "night_low",
+   "label": "average night low over the year",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "mean of the 12 monthly average daily minimums",
+   "areas_with_value": 1581282
+  },
+  {
+   "key": "day_night_range",
+   "label": "average gap between day high and night low",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "mean over the year of day high minus night low",
+   "areas_with_value": 1581282
+  },
+  {
+   "key": "hottest_month_high",
+   "label": "average day high of the hottest month",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "highest monthly average daily maximum",
+   "areas_with_value": 1581282
+  },
+  {
+   "key": "coldest_month_low",
+   "label": "average night low of the coldest month",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "lowest monthly average daily minimum",
+   "areas_with_value": 1581282
+  },
+  {
+   "key": "rain",
+   "label": "yearly precipitation (rain and snow as water)",
+   "unit": "mm",
+   "scale": 1,
+   "how": "sum of the 12 monthly totals",
+   "areas_with_value": 2193517
+  },
+  {
+   "key": "wettest_month",
+   "label": "precipitation of the wettest month",
+   "unit": "mm",
+   "scale": 0.1,
+   "how": "highest monthly total",
+   "areas_with_value": 2193517
+  },
+  {
+   "key": "dry_months",
+   "label": "months with under 30 mm of precipitation",
+   "unit": "months",
+   "scale": 1,
+   "how": "count of months below 30 mm",
+   "areas_with_value": 2193517
+  },
+  {
+   "key": "sunshine",
+   "label": "yearly sunshine",
+   "unit": "hours",
+   "scale": 1,
+   "how": "sum of the 12 monthly hours of bright sunshine",
+   "areas_with_value": 1571033
+  },
+  {
+   "key": "wind",
+   "label": "average wind speed",
+   "unit": "m/s",
+   "scale": 0.01,
+   "how": "mean of the 12 monthly mean speeds about 10 m above the ground",
+   "areas_with_value": 1563963
+  },
+  {
+   "key": "humidity",
+   "label": "average relative humidity",
+   "unit": "%",
+   "scale": 0.1,
+   "how": "mean over the year of the humidity calculated from dew point, night low and day high",
+   "areas_with_value": 2178930
+  },
+  {
+   "key": "dew_point",
+   "label": "average dew point",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "mean of the 12 monthly mean dew points",
+   "areas_with_value": 2178930
+  },
+  {
+   "key": "muggy_months",
+   "label": "months with an average dew point of 18 \u00b0C or more",
+   "unit": "months",
+   "scale": 1,
+   "how": "count of months with mean dew point >= 18 \u00b0C",
+   "areas_with_value": 2178930
+  },
+  {
+   "key": "snow",
+   "label": "yearly fresh snow",
+   "unit": "cm",
+   "scale": 0.1,
+   "how": "sum of the 12 monthly snowfalls (1 mm of water \u2248 1 cm of snow)",
+   "areas_with_value": 2192374
+  },
+  {
+   "key": "snow_cover_months",
+   "label": "months with snow on the ground (average depth 1 cm or more)",
+   "unit": "months",
+   "scale": 1,
+   "how": "count of months with mean snow depth >= 1 cm",
+   "areas_with_value": 2192374
+  },
+  {
+   "key": "sea_temperature",
+   "label": "average sea surface temperature nearby (coastal areas only)",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "mean of the 12 monthly sea temperatures of the nearest sea within 60 km",
+   "areas_with_value": 150464
+  },
+  {
+   "key": "warmest_sea_month",
+   "label": "sea surface temperature in the warmest month (coastal areas only)",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "highest monthly sea temperature",
+   "areas_with_value": 150464
+  },
+  {
+   "key": "day_to_day_spread",
+   "label": "day-to-day temperature spread (standard deviation of daily temperatures within a month)",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "mean over the 12 months of the standard deviation of daily mean temperature around the month\u2019s average",
+   "areas_with_value": 2191001
+  },
+  {
+   "key": "day_to_day_spread_highs",
+   "label": "day-to-day spread of day highs (standard deviation)",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "mean over the 12 months of the standard deviation of daily highs",
+   "areas_with_value": 2191001
+  },
+  {
+   "key": "day_to_day_spread_lows",
+   "label": "day-to-day spread of night lows (standard deviation)",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "mean over the 12 months of the standard deviation of daily lows",
+   "areas_with_value": 2191001
+  },
+  {
+   "key": "year_to_year_spread",
+   "label": "year-to-year temperature spread (standard deviation of a month\u2019s average from one year to the next)",
+   "unit": "\u00b0C",
+   "scale": 0.01,
+   "how": "mean over the 12 months of the standard deviation of the monthly mean temperature across 1981\u20132010",
+   "areas_with_value": 2191001
+  },
+  {
+   "key": "year_to_year_spread_rain",
+   "label": "how much a month\u2019s precipitation varies from year to year (standard deviation as % of its average)",
+   "unit": "%",
+   "scale": 0.1,
+   "how": "mean over the 12 months of the coefficient of variation of the monthly total across 1981\u20132010",
+   "areas_with_value": 1957056
+  }
+ ],
+ "sources": "the same values as the globe: CHELSA V2.1 + station adjustment (temperature, rain, wind), CRU CL 2.0 (sunshine, day-night range), ERA5-Land (dew point, snow), ERA5 (sea temperature, day-to-day spread), ERA5-Land monthly (year-to-year spread); 1981-2010"
+}
