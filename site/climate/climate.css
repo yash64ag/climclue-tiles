@@ -58,8 +58,13 @@ ul.towns li{margin:3px 0}
 footer{border-top:1px solid #e3d6c0;max-width:860px;margin:0 auto;padding:16px 16px 40px;font-size:14px;color:#5d6a70}
 footer h2{font-size:17px;margin:4px 0 6px}
 @media (max-width:560px){h1{font-size:25px}th,td{padding:5px 6px;font-size:14px}.brand{font-size:18px}}
-.pn{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 16px;margin:24px 0 6px}
-.months{display:flex;flex-wrap:wrap;gap:4px 12px;margin:6px 0 16px}
+.pn{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;margin:24px 0 8px}
+.pn a{display:inline-block;padding:8px 14px;border-radius:999px;background:#142d3a;color:#fff;font-weight:600;font-size:14px;text-decoration:none}
+.pn a:hover{background:#e8833a;color:#fff}
+.months{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 16px}
+.months a,.months b{display:inline-block;min-width:44px;text-align:center;padding:5px 10px;border-radius:999px;background:#fff;border:1px solid #eadfcb;font-size:14px;text-decoration:none}
+.months b{background:#e8833a;border-color:#e8833a;color:#fff}
+.months a:hover{border-color:#e8833a;background:#fff4e2}
 section h3{margin-top:22px}
 section p{margin:4px 0}
 
@@ -169,3 +174,36 @@ a.pin:hover{background:#efb875;color:#142d3a;z-index:3}
 .pills a{display:inline-block;padding:4px 11px;border-radius:999px;background:#fff;border:1px solid #eadfcb;font-size:14px;text-decoration:none}
 .pills a:hover{border-color:#e8833a;background:#fff4e2}
 .tag.swim-bathwarm{background:#c4481c;color:#fff}.tag.swim-warm{background:#ee9640;color:#1f2d33}.tag.swim-refreshing{background:#f7d68c;color:#1f2d33}.tag.swim-cold{background:#c4d4de;color:#1f2d33}
+
+/* Explore band above the footer on every page (27 Nov 2026) and the footer's popular cities as chips. */
+.explore-band{max-width:860px;margin:26px auto 0;padding:0 16px}
+.explore-band a{box-sizing:border-box;display:flex;align-items:center;gap:16px;padding:16px 18px;border-radius:18px;background:radial-gradient(120% 120% at 20% 10%,#1d3a4c 0%,#0f2230 70%);color:#edf2f2;text-decoration:none;transition:transform .12s,box-shadow .12s}
+.explore-band a:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(20,45,58,.25);color:#edf2f2}
+.explore-band img{width:84px;height:84px;flex:none;border-radius:20px;background:#fff1;padding:6px}
+.explore-band .eb-t{flex:1;min-width:0}
+.explore-band .eb-t b{display:block;font-size:18px;line-height:1.3;color:#fff}
+.explore-band .eb-t small{display:block;margin-top:4px;font-size:14px;line-height:1.45;color:#b9c8cf}
+.explore-band .eb-go{flex:none;background:#e8833a;color:#fff;font-weight:700;padding:10px 16px;border-radius:999px;white-space:nowrap}
+.popular-band{margin:0 0 14px;padding:14px 16px;border-radius:16px;background:#142d3a;color:#b9c8cf}
+.popular-band h2{margin:0 0 8px;font-size:15px;color:#fff}
+.popular-band ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.popular-band a{display:inline-flex;align-items:center;gap:7px;padding:5px 12px 5px 9px;border-radius:999px;background:#1f4252;border:1px solid #2f5a6c;color:#eef4f6;font-size:13.5px;text-decoration:none}
+.popular-band a:hover{background:#285468;border-color:#e8833a;color:#fff}
+.popular-band a i{width:10px;height:10px;border-radius:50%;flex:none;background:var(--c,#8aa3ad);box-shadow:0 0 0 1px #0f2230}
+.popular-band p{margin:10px 0 0;font-size:12.5px}
+@media (max-width:560px){.explore-band a{flex-wrap:wrap;gap:12px}.explore-band img{width:60px;height:60px}.explore-band .eb-go{width:100%;text-align:center}}
+/* Chip rows and fact rows (27 Nov 2026): replace plain "a · b · c" lists and bare bullet lists. */
+.chip-row{margin:10px 0 16px}
+.chip-row .cr-k{display:block;font-size:12.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#7a6a55;margin:0 0 6px}
+.chip-row .pills{margin:0}
+.pills .here{display:inline-block;padding:4px 11px;border-radius:999px;background:#142d3a;color:#fff;border:1px solid #142d3a;font-size:14px}
+.pills a .v,.pills .here .v{margin-left:4px;font-size:12px;padding:1px 6px}
+.facts{list-style:none;margin:10px 0 16px;padding:0;display:grid;gap:8px}
+.facts li{padding:10px 14px;border-radius:12px;background:#fff;border:1px solid #eadfcb;border-left:4px solid #e8833a;line-height:1.5}
+footer .foot-links{list-style:none;margin:0 0 12px;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+footer .foot-links a{display:block;padding:9px 12px;border-radius:10px;background:#fff;border:1px solid #eadfcb;color:#a8501a;font-weight:600;font-size:14px;text-decoration:none}
+footer .foot-links a:hover{border-color:#e8833a;background:#fff4e2}
+footer .foot-note{margin:6px 0 8px}
+footer .foot-legal{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+footer .foot-legal a{display:inline-block;padding:3px 10px;border-radius:999px;border:1px solid #eadfcb;font-size:13px;text-decoration:none;color:#5d6a70}
+footer .foot-legal a:hover{border-color:#e8833a;color:#a8501a}
